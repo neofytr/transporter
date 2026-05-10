@@ -4,6 +4,7 @@
 #define TRANSPORTER_GUI_VIEWS_APP_HPP
 
 #include <transporter/config/config.hpp>
+#include <transporter/dbus/service.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/library/library.hpp>
 
@@ -14,7 +15,9 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace transporter::gui {
 
@@ -26,14 +29,23 @@ struct LogEntry {
 };
 
 struct AppState {
+    std::filesystem::path config_path;
     config::Config cfg;
     std::unique_ptr<engine::Engine> engine_;
     std::unique_ptr<library::Library> library_;
+    std::unique_ptr<dbus_svc::DbusService> dbus_;
 
     std::string preferred_device;     // last applied --device or [device].preferred
     std::vector<engine::DeviceInfo> devices;
 
     std::filesystem::path queued_file;  // launch arg, played once
+
+    // In-process queue. Phase 10 keeps it minimal: command-line file lands
+    // here on launch, OpenUri appends, MPRIS Next/Previous walks it. Index
+    // is the currently-loaded slot (or -1 when empty).
+    std::mutex queue_mtx;
+    std::vector<std::filesystem::path> queue;
+    std::int32_t queue_index = -1;
 
     ViewId current_view = ViewId::Main;
 
@@ -50,6 +62,11 @@ struct AppState {
 
     void push_log(std::string text);
     std::vector<LogEntry> snapshot_log(std::size_t max = 12) const;
+
+    // Queue helpers; called from any thread (DBus event-loop in particular).
+    std::optional<std::filesystem::path> queue_next();
+    std::optional<std::filesystem::path> queue_previous();
+    void queue_set_single(std::filesystem::path p);
 };
 
 // Each draw_* fn renders a single ImGui window's contents within the current

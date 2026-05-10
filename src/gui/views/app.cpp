@@ -7,6 +7,7 @@
 #include "../platform/platform.hpp"
 
 #include <transporter/config/config.hpp>
+#include <transporter/dbus/service.hpp>
 #include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/error.hpp>
@@ -21,10 +22,12 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace transporter::gui {
 
@@ -108,6 +111,34 @@ std::vector<LogEntry> AppState::snapshot_log(std::size_t max) const {
     return out;
 }
 
+std::optional<std::filesystem::path> AppState::queue_next() {
+    std::lock_guard lk(queue_mtx);
+    if (queue.empty()) {
+        return std::nullopt;
+    }
+    if (queue_index + 1 >= static_cast<std::int32_t>(queue.size())) {
+        return std::nullopt;
+    }
+    ++queue_index;
+    return queue[static_cast<std::size_t>(queue_index)];
+}
+
+std::optional<std::filesystem::path> AppState::queue_previous() {
+    std::lock_guard lk(queue_mtx);
+    if (queue.empty() || queue_index <= 0) {
+        return std::nullopt;
+    }
+    --queue_index;
+    return queue[static_cast<std::size_t>(queue_index)];
+}
+
+void AppState::queue_set_single(std::filesystem::path p) {
+    std::lock_guard lk(queue_mtx);
+    queue.clear();
+    queue.emplace_back(std::move(p));
+    queue_index = 0;
+}
+
 namespace {
 
 void wire_engine_events(AppState& st) {
@@ -166,6 +197,9 @@ bool maybe_play_queued_file(AppState& st) {
         st.push_log(std::string{"queued play failed: "} + pr.error().message);
     } else {
         st.push_log("loaded: " + st.queued_file.string());
+        if (st.dbus_ != nullptr) {
+            st.dbus_->notify_track_loaded();
+        }
     }
     st.queued_file.clear();
     return true;
@@ -204,6 +238,51 @@ void open_engine_and_library(AppState& st, const AppArgs& args) {
         }
     } else {
         st.push_log(std::string{"library open failed: "} + l.error().message);
+    }
+}
+
+void open_dbus_service(AppState& st) {
+    if (!st.cfg.dbus.enabled) {
+        return;
+    }
+    dbus_svc::Hooks hooks;
+    hooks.next = [&st]() -> std::optional<std::filesystem::path> {
+        return st.queue_next();
+    };
+    hooks.previous = [&st]() -> std::optional<std::filesystem::path> {
+        return st.queue_previous();
+    };
+    hooks.reload_config = [&st]() -> bool {
+        if (st.config_path.empty()) {
+            return false;
+        }
+        auto r = config::load_file(st.config_path);
+        if (!r) {
+            return false;
+        }
+        // Hot-reload: library roots + dbus enabled + theme override path. The
+        // device, audio policy, and dbus.enabled toggle are not hot.
+        st.cfg.library = r->library;
+        st.cfg.theme = r->theme;
+        if (st.library_ != nullptr) {
+            st.library_->rescan_async();
+        }
+        return true;
+    };
+    hooks.rescan_library = [&st] {
+        if (st.library_ != nullptr) {
+            st.library_->rescan_async();
+        }
+    };
+    dbus_svc::Config dc;
+    dc.enabled = st.cfg.dbus.enabled;
+    auto svc = dbus_svc::DbusService::start(
+        st.engine_.get(), st.library_.get(), std::move(hooks), dc);
+    if (svc) {
+        st.dbus_ = std::move(*svc);
+    } else {
+        st.push_log(std::string{"dbus start failed: "} +
+                    svc.error().message);
     }
 }
 
@@ -258,9 +337,13 @@ void handle_view_shortcuts(AppState& st) {
 
 int run(const AppArgs& args) {
     AppState st;
+    st.config_path = args.config_path;
     st.cfg = load_config_or_defaults(args.config_path);
     st.current_view = default_to_viewid(st.cfg.ui.default_view);
     st.queued_file = args.file_to_play;
+    if (!st.queued_file.empty()) {
+        st.queue_set_single(st.queued_file);
+    }
 
     auto win_or = platform::Window::create(platform::WindowConfig{});
     if (!win_or) {
@@ -271,6 +354,7 @@ int run(const AppArgs& args) {
     auto& win = **win_or;
 
     open_engine_and_library(st, args);
+    open_dbus_service(st);
     bool queued_done = false;
 
     while (win.poll()) {
@@ -308,28 +392,52 @@ int run(const AppArgs& args) {
 
 int run_headless(const AppArgs& args) {
     AppState st;
+    st.config_path = args.config_path;
     st.cfg = load_config_or_defaults(args.config_path);
 
     if (auto r = engine::list_playback_devices(); r) {
         st.devices = std::move(*r);
     }
     const std::string device_id = pick_device(st.cfg, args.device_override, st.devices);
+    int engine_create_exit = 0;
     if (device_id.empty()) {
         std::fprintf(stderr,
                      "transporter: no playback devices available (no DAC)\n");
-        return 2;
+        engine_create_exit = 2;
+    } else {
+        engine::EngineConfig ec{};
+        ec.device_id = device_id;
+        auto e = engine::Engine::create(std::move(ec));
+        if (!e) {
+            std::fprintf(stderr, "transporter: engine create failed [%s] %s\n",
+                         std::string(engine::error_code_name(e.error().code)).c_str(),
+                         e.error().message.c_str());
+            engine_create_exit = 3;
+        } else {
+            st.engine_ = std::move(*e);
+        }
     }
 
-    engine::EngineConfig ec{};
-    ec.device_id = device_id;
-    auto e = engine::Engine::create(std::move(ec));
-    if (!e) {
-        std::fprintf(stderr, "transporter: engine create failed [%s] %s\n",
-                     std::string(engine::error_code_name(e.error().code)).c_str(),
-                     e.error().message.c_str());
-        return 3;
+    // Bring DBus up regardless of engine create outcome, so even an
+    // engine-less run still publishes a service that returns "Stopped" and
+    // exits cleanly. This matches the spec: the DBus service should come up
+    // independently of the engine.
+    if (!args.file_to_play.empty()) {
+        st.queue_set_single(args.file_to_play);
     }
-    st.engine_ = std::move(*e);
+    open_dbus_service(st);
+    if (st.cfg.dbus.enabled && st.dbus_ == nullptr) {
+        // Bus name conflict (likely a second instance) or session-bus open
+        // failed. Headless mode treats this as fatal so scripts notice.
+        std::fprintf(stderr,
+                     "transporter: DBus service unavailable; another "
+                     "instance may be running\n");
+        return 8;
+    }
+
+    if (engine_create_exit != 0) {
+        return engine_create_exit;
+    }
 
     if (args.file_to_play.empty()) {
         std::fprintf(stderr, "transporter: --no-gui requires a file argument\n");
@@ -346,6 +454,9 @@ int run_headless(const AppArgs& args) {
             std::printf("loaded rate=%u ch=%u total=%llu\n",
                         ev.format.sample_rate_hz, ev.format.channels,
                         static_cast<unsigned long long>(ev.total_frames));
+            if (st.dbus_ != nullptr) {
+                st.dbus_->notify_track_loaded();
+            }
             break;
         case engine::Event::Kind::TrackEnded:
             std::printf("ended\n");

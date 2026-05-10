@@ -41,12 +41,17 @@ struct UiSection {
     DefaultView default_view = DefaultView::Main;
 };
 
+struct DbusSection {
+    bool enabled = true;
+};
+
 struct Config {
     DeviceSection device;
     AudioSection audio;
     LibrarySection library;
     ThemeSection theme;
     UiSection ui;
+    DbusSection dbus;
 };
 
 // Default location: $XDG_CONFIG_HOME/transporter/config.toml, falling back to

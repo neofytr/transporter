@@ -33,3 +33,11 @@ test_library_browse = executable(
   'library_browse.cpp',
   dependencies : [library_dep],
 )
+
+# Live-bus smoke test for DBus. Not registered as a `meson test` because it
+# requires a reachable session bus and exits 0 when none is found.
+test_dbus_smoke = executable(
+  'test_dbus_smoke',
+  'dbus_smoke.cpp',
+  dependencies : [dbus_dep],
+)

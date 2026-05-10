@@ -159,6 +159,12 @@ std::expected<Config, Error> parse(std::string_view toml_text) {
         }
     }
 
+    if (auto* db = tbl["dbus"].as_table()) {
+        if (auto v = (*db)["enabled"].value<bool>()) {
+            cfg.dbus.enabled = *v;
+        }
+    }
+
     return cfg;
 }
 

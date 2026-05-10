@@ -64,8 +64,8 @@ executable(
   'transporter',
   'src/main.cpp',
   include_directories : [inc_public, include_directories('src')],
-  dependencies : [gui_dep, engine_dep, library_dep, config_dep],
-  link_with : [theme_lib, dbus_lib],
+  dependencies : [gui_dep, engine_dep, library_dep, config_dep, dbus_dep],
+  link_with : [theme_lib],
   install : true,
 )
 

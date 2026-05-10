@@ -171,3 +171,11 @@ test_gui_pipeline_render = executable(
   dependencies : [gui_dep, engine_dep, imgui_dep],
 )
 test('gui_pipeline_render', test_gui_pipeline_render)
+
+test_dbus_metadata = executable(
+  'test_dbus_metadata',
+  'dbus_metadata.cpp',
+  include_directories : dbus_internal_inc,
+  dependencies : [dbus_dep, engine_dep],
+)
+test('dbus_metadata', test_dbus_metadata)
