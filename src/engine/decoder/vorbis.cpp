@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -75,6 +76,18 @@ void parse_vorbis_comment(vorbis_comment* vc, Tags& out) {
             out.track_no.assign(val);
         } else if (keylc == "date" || keylc == "year") {
             out.date.assign(val);
+        } else if (keylc == "replaygain_track_gain") {
+            try { out.rg_track_gain = std::stof(std::string(val)); }
+            catch (const std::exception&) {}
+        } else if (keylc == "replaygain_track_peak") {
+            try { out.rg_track_peak = std::stof(std::string(val)); }
+            catch (const std::exception&) {}
+        } else if (keylc == "replaygain_album_gain") {
+            try { out.rg_album_gain = std::stof(std::string(val)); }
+            catch (const std::exception&) {}
+        } else if (keylc == "replaygain_album_peak") {
+            try { out.rg_album_peak = std::stof(std::string(val)); }
+            catch (const std::exception&) {}
         }
     }
 }

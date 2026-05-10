@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -88,6 +89,29 @@ void slurp_id3v2(const mpg123_id3v2* v2, Tags& out) {
             out.album_artist = take(&t.text);
         } else if (out.date.empty() && (id == "TYER" || id == "TDRC")) {
             out.date = take(&t.text);
+        }
+    }
+    // ReplayGain lives in TXXX frames; description holds the tag name.
+    auto parse_rg_float = [&](const mpg123_string* s, float& dst) {
+        const std::string raw = take(s);
+        if (raw.empty()) return;
+        try { dst = std::stof(raw); } catch (const std::exception&) {}
+    };
+    for (std::size_t i = 0; i < v2->extras; ++i) {
+        const auto& x = v2->extra[i];
+        std::string desc = take(&x.description);
+        // Normalise to uppercase for comparison.
+        for (char& c : desc) {
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - ('a' - 'A'));
+        }
+        if (desc == "REPLAYGAIN_TRACK_GAIN") {
+            parse_rg_float(&x.text, out.rg_track_gain);
+        } else if (desc == "REPLAYGAIN_TRACK_PEAK") {
+            parse_rg_float(&x.text, out.rg_track_peak);
+        } else if (desc == "REPLAYGAIN_ALBUM_GAIN") {
+            parse_rg_float(&x.text, out.rg_album_gain);
+        } else if (desc == "REPLAYGAIN_ALBUM_PEAK") {
+            parse_rg_float(&x.text, out.rg_album_peak);
         }
     }
 }

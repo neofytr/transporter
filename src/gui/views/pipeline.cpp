@@ -13,6 +13,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -157,6 +158,33 @@ void source_card(const PipelineSnapshot& s) {
     kv("tag title", s.source.tags.title);
     kv("tag track", s.source.tags.track_no);
     kv("tag date", s.source.tags.date);
+    {
+        // ReplayGain (read from file tags; not applied to audio path)
+        const auto& tg = s.source.tags;
+        const bool has_rg = !std::isnan(tg.rg_track_gain) ||
+                            !std::isnan(tg.rg_album_gain);
+        if (has_rg) {
+            ImGui::Separator();
+            ImGui::TextColored(kMuted, "ReplayGain (file tags, not applied)");
+            char buf[32];
+            if (!std::isnan(tg.rg_track_gain)) {
+                std::snprintf(buf, sizeof(buf), "%.2f dB", static_cast<double>(tg.rg_track_gain));
+                kv("track gain", buf);
+            }
+            if (!std::isnan(tg.rg_track_peak)) {
+                std::snprintf(buf, sizeof(buf), "%.6f", static_cast<double>(tg.rg_track_peak));
+                kv("track peak", buf);
+            }
+            if (!std::isnan(tg.rg_album_gain)) {
+                std::snprintf(buf, sizeof(buf), "%.2f dB", static_cast<double>(tg.rg_album_gain));
+                kv("album gain", buf);
+            }
+            if (!std::isnan(tg.rg_album_peak)) {
+                std::snprintf(buf, sizeof(buf), "%.6f", static_cast<double>(tg.rg_album_peak));
+                kv("album peak", buf);
+            }
+        }
+    }
     card_end();
 }
 

@@ -138,10 +138,67 @@ void render_frame(WindowImpl& w, float r, float g, float b) {
                 continue;
             }
             const ImVec4 clip = cmd.ClipRect;
-            for (unsigned ei = 0; ei < cmd.ElemCount; ei += 3) {
+            unsigned ei = 0;
+            while (ei < cmd.ElemCount) {
+                // Fast path: 6-index axis-aligned filled quad (two triangles, uniform colour).
+                // ImGui standard pattern: {a,b,c, a,c,d}
+                if (ei + 6 <= cmd.ElemCount) {
+                    const ImDrawIdx i0 = idx[ei+0], i1 = idx[ei+1], i2 = idx[ei+2];
+                    const ImDrawIdx i3 = idx[ei+3], i4 = idx[ei+4], i5 = idx[ei+5];
+                    if (i0 == i3 && i2 == i4) {
+                        const ImDrawVert& va = vtx[i0];
+                        const ImDrawVert& vb = vtx[i1];
+                        const ImDrawVert& vc = vtx[i2];
+                        const ImDrawVert& vd = vtx[i5];
+                        if (va.col == vb.col && va.col == vc.col && va.col == vd.col) {
+                            const float x0 = std::min({va.pos.x, vb.pos.x, vc.pos.x, vd.pos.x});
+                            const float y0 = std::min({va.pos.y, vb.pos.y, vc.pos.y, vd.pos.y});
+                            const float x1 = std::max({va.pos.x, vb.pos.x, vc.pos.x, vd.pos.x});
+                            const float y1 = std::max({va.pos.y, vb.pos.y, vc.pos.y, vd.pos.y});
+                            // Centre UV — sample atlas once for the whole quad
+                            const float cu = (va.uv.x + vb.uv.x + vc.uv.x + vd.uv.x) * 0.25f;
+                            const float cv = (va.uv.y + vb.uv.y + vc.uv.y + vd.uv.y) * 0.25f;
+                            uint32_t tex_alpha = 255u;
+                            if (w.font_pixels && w.font_atlas_w > 0 && w.font_atlas_h > 0) {
+                                const int tx = std::clamp(static_cast<int>(cu * static_cast<float>(w.font_atlas_w)), 0, w.font_atlas_w - 1);
+                                const int ty = std::clamp(static_cast<int>(cv * static_cast<float>(w.font_atlas_h)), 0, w.font_atlas_h - 1);
+                                tex_alpha = w.font_pixels[ty * w.font_atlas_w + tx];
+                            }
+                            const uint32_t src_a = (va.col >> 24) & 0xFFu;
+                            const uint32_t alpha = (src_a * tex_alpha) / 255u;
+                            const uint32_t src = to_xrgb(va.col);
+
+                            const int rx0 = std::max({static_cast<int>(x0), static_cast<int>(clip.x), 0});
+                            const int ry0 = std::max({static_cast<int>(y0), static_cast<int>(clip.y), 0});
+                            const int rx1 = std::min({static_cast<int>(x1), static_cast<int>(clip.z), w.width});
+                            const int ry1 = std::min({static_cast<int>(y1), static_cast<int>(clip.w), w.height});
+
+                            if (rx0 < rx1 && ry0 < ry1) {
+                                if (alpha >= 255u) {
+                                    for (int py = ry0; py < ry1; ++py) {
+                                        uint32_t* row = pixels + py * pstride + rx0;
+                                        for (int px = rx0; px < rx1; ++px) *row++ = src;
+                                    }
+                                } else if (alpha > 0u) {
+                                    for (int py = ry0; py < ry1; ++py) {
+                                        uint32_t* row = pixels + py * pstride + rx0;
+                                        for (int px = rx0; px < rx1; ++px) {
+                                            *row = blend_over(*row, src, alpha);
+                                            ++row;
+                                        }
+                                    }
+                                }
+                            }
+                            ei += 6;
+                            continue;
+                        }
+                    }
+                }
+                // General case: single triangle
                 rasterize_tri(pixels, pstride, w.width, w.height,
-                              vtx[idx[ei + 0]], vtx[idx[ei + 1]], vtx[idx[ei + 2]],
+                              vtx[idx[ei+0]], vtx[idx[ei+1]], vtx[idx[ei+2]],
                               clip, w.font_pixels, w.font_atlas_w, w.font_atlas_h);
+                ei += 3;
             }
             idx += cmd.ElemCount;
         }

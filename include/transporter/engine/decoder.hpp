@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
 #include <string>
 
@@ -25,6 +26,13 @@ struct Tags {
     std::string title;
     std::string track_no;
     std::string date;
+
+    // ReplayGain from file tags — read-only display; not applied to audio path.
+    // NaN when the tag is absent.
+    float rg_track_gain = std::numeric_limits<float>::quiet_NaN(); // dB
+    float rg_track_peak = std::numeric_limits<float>::quiet_NaN();
+    float rg_album_gain = std::numeric_limits<float>::quiet_NaN(); // dB
+    float rg_album_peak = std::numeric_limits<float>::quiet_NaN();
 };
 
 // Streaming PCM decoder. One instance per open file. Single-threaded; the
