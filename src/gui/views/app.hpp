@@ -21,7 +21,7 @@
 
 namespace transporter::gui {
 
-enum class ViewId { Main, Library, Pipeline };
+enum class ViewId { Main, Library, Pipeline, Queue };
 
 struct LogEntry {
     std::chrono::steady_clock::time_point at;
@@ -88,6 +88,11 @@ struct AppState {
     void queue_set_single(std::filesystem::path p);
     // Returns the path after the current index without advancing it.
     std::optional<std::filesystem::path> queue_peek_next() const;
+
+    void queue_append(std::filesystem::path p);
+    bool queue_jump_to(std::int32_t idx);
+    void queue_remove(std::int32_t idx);
+    void queue_clear();
 };
 
 // Each draw_* fn renders a single ImGui window's contents within the current
@@ -96,6 +101,7 @@ struct AppState {
 void draw_main_view(AppState& st);
 void draw_library_view(AppState& st);
 void draw_pipeline_view(AppState& st);
+void draw_queue_view(AppState& st);
 
 // Test seam: render the pipeline view directly from a snapshot, decoupled
 // from Engine. Same content, no engine pointer dereferenced.

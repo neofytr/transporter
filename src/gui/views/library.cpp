@@ -116,6 +116,15 @@ void draw_library_view(AppState& st) {
                 if (ImGui::Selectable(label.c_str())) {
                     play_track(st, t);
                 }
+                if (ImGui::BeginPopupContextItem()) {
+                    if (ImGui::MenuItem("Play now")) {
+                        play_track(st, t);
+                    }
+                    if (ImGui::MenuItem("Add to queue")) {
+                        st.queue_append(t.path);
+                    }
+                    ImGui::EndPopup();
+                }
             }
             ImGui::EndChild();
         } else {
@@ -174,6 +183,15 @@ void draw_library_view(AppState& st) {
                                     if (ImGui::IsMouseDoubleClicked(0)) {
                                         play_album(st, *tracks, ti);
                                     }
+                                }
+                                if (ImGui::BeginPopupContextItem()) {
+                                    if (ImGui::MenuItem("Play now")) {
+                                        play_album(st, *tracks, ti);
+                                    }
+                                    if (ImGui::MenuItem("Add to queue")) {
+                                        st.queue_append((*tracks)[ti].path);
+                                    }
+                                    ImGui::EndPopup();
                                 }
                             }
                         }

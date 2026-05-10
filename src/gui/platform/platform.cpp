@@ -147,7 +147,7 @@ bool Window::poll() {
         return false;
     }
     pollfd pfd{wl_display_get_fd(impl_->display), POLLIN, 0};
-    int rc = ::poll(&pfd, 1, 0);  // non-blocking; eglSwapBuffers paces us
+    int rc = ::poll(&pfd, 1, 8);  // 8 ms cap (~120 fps); NVidia EGL ignores SwapInterval
     if (rc > 0 && (pfd.revents & POLLIN) != 0) {
         if (wl_display_read_events(impl_->display) < 0) {
             return false;

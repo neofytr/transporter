@@ -163,6 +163,53 @@ std::optional<std::filesystem::path> AppState::queue_peek_next() const {
     return queue[static_cast<std::size_t>(next)];
 }
 
+void AppState::queue_append(std::filesystem::path p) {
+    std::lock_guard lk(queue_mtx);
+    queue.emplace_back(std::move(p));
+}
+
+bool AppState::queue_jump_to(std::int32_t idx) {
+    if (engine_ == nullptr) {
+        return false;
+    }
+    std::filesystem::path target;
+    {
+        std::lock_guard lk(queue_mtx);
+        if (idx < 0 || idx >= static_cast<std::int32_t>(queue.size())) {
+            return false;
+        }
+        queue_index = idx;
+        target = queue[static_cast<std::size_t>(idx)];
+    }
+    if (!engine_->load(target)) {
+        return false;
+    }
+    (void)engine_->play();
+    return true;
+}
+
+void AppState::queue_remove(std::int32_t idx) {
+    std::lock_guard lk(queue_mtx);
+    if (idx < 0 || idx >= static_cast<std::int32_t>(queue.size())) {
+        return;
+    }
+    queue.erase(queue.begin() + idx);
+    if (queue.empty()) {
+        queue_index = -1;
+    } else if (idx <= queue_index) {
+        --queue_index;
+        if (queue_index < 0) {
+            queue_index = 0;
+        }
+    }
+}
+
+void AppState::queue_clear() {
+    std::lock_guard lk(queue_mtx);
+    queue.clear();
+    queue_index = -1;
+}
+
 namespace {
 
 void wire_engine_events(AppState& st) {
@@ -365,6 +412,7 @@ void draw_tab_bar(AppState& st) {
     tab("Main (F1)", ViewId::Main);
     tab("Library (F2)", ViewId::Library);
     tab("Pipeline (F3)", ViewId::Pipeline);
+    tab("Queue (F4)", ViewId::Queue);
     ImGui::NewLine();
     ImGui::Separator();
 }
@@ -383,11 +431,15 @@ void handle_view_shortcuts(AppState& st) {
     if (ImGui::IsKeyPressed(ImGuiKey_F3)) {
         st.current_view = ViewId::Pipeline;
     }
+    if (ImGui::IsKeyPressed(ImGuiKey_F4)) {
+        st.current_view = ViewId::Queue;
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Tab)) {
         switch (st.current_view) {
         case ViewId::Main:     st.current_view = ViewId::Library;  break;
         case ViewId::Library:  st.current_view = ViewId::Pipeline; break;
-        case ViewId::Pipeline: st.current_view = ViewId::Main;     break;
+        case ViewId::Pipeline: st.current_view = ViewId::Queue;    break;
+        case ViewId::Queue:    st.current_view = ViewId::Main;     break;
         }
     }
 }
@@ -531,6 +583,7 @@ int run(const AppArgs& args) {
             case ViewId::Main:     draw_main_view(st);     break;
             case ViewId::Library:  draw_library_view(st);  break;
             case ViewId::Pipeline: draw_pipeline_view(st); break;
+            case ViewId::Queue:    draw_queue_view(st);    break;
             }
         }
 

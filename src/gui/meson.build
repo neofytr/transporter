@@ -44,6 +44,7 @@ gui_sources = files(
   'views/main.cpp',
   'views/library.cpp',
   'views/pipeline.cpp',
+  'views/queue.cpp',
 )
 
 gui_lib = static_library(
