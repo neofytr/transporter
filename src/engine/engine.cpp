@@ -93,6 +93,7 @@ struct Engine::Impl {
     // statistics).
     std::atomic<std::uint64_t> frames_decoded{0};
     std::atomic<std::uint64_t> frames_written{0};
+    std::atomic<std::uint64_t> frames_written_at_track_start{0};
     std::atomic<std::uint32_t> xrun_count{0};
     std::atomic<std::size_t> ring_fill_bytes{0};      // last-known consumer view
     std::atomic<std::size_t> ring_max_watermark{0};   // session-wide max producer fill
@@ -133,8 +134,9 @@ struct Engine::Impl {
 
     // Command queue (API → engine worker, plus hotplug watcher → worker)
     enum class CmdKind : std::uint8_t {
-        Load, Play, Pause, Stop, Shutdown,
+        Load, Play, Pause, Stop, Seek, Shutdown,
         DeviceRemoved, DeviceAdded,
+        Preload, CancelPreload,
     };
     struct Cmd {
         CmdKind kind;
@@ -142,6 +144,7 @@ struct Engine::Impl {
         // Hotplug command payload. Filled for DeviceRemoved / DeviceAdded.
         DeviceFingerprint hp_fp{};
         int hp_card_index{-1};
+        std::uint64_t seek_frame{0};  // Seek only
     };
     std::mutex cmd_mtx;
     std::condition_variable cmd_cv;
@@ -185,6 +188,14 @@ struct Engine::Impl {
     std::thread decoder_thread;
     std::thread audio_thread;
 
+    // Preloaded next-track decoder. Set by CmdKind::Preload on the worker;
+    // consumed by decoder_thread_fn_ on current-track EOF when the format
+    // matches exactly. Protected by next_mtx; the decoder thread acquires it
+    // only at EOF (infrequent), so there is no contention on the hot path.
+    std::mutex next_mtx;
+    std::unique_ptr<IDecoder> next_decoder;
+    std::filesystem::path next_path;
+
     // Decode/audio coordination
     std::mutex run_mtx;
     std::condition_variable run_cv;
@@ -209,12 +220,14 @@ struct Engine::Impl {
         ev.state = s;
         post_event_(std::move(ev));
     }
-    void emit_track_loaded_(const PcmFormat& f, const Tags& t, std::uint64_t total) {
+    void emit_track_loaded_(const PcmFormat& f, const Tags& t, std::uint64_t total,
+                            std::filesystem::path fpath) {
         Event ev;
         ev.kind = Event::Kind::TrackLoaded;
         ev.format = f;
         ev.tags = t;
         ev.total_frames = total;
+        ev.file_path = std::move(fpath);
         post_event_(std::move(ev));
     }
     void emit_rate_switched_(const PcmFormat& f) {
@@ -330,6 +343,58 @@ struct Engine::Impl {
                 return;
             }
             if (*r == 0) {
+                // Current decoder reached EOF. Attempt gapless continuation
+                // if a next decoder is staged and the formats match exactly.
+                std::unique_lock next_lk(next_mtx);
+                if (next_decoder &&
+                    next_decoder->format().sample_rate_hz == fmt.sample_rate_hz &&
+                    next_decoder->format().channels == fmt.channels &&
+                    next_decoder->format().sample_format == fmt.sample_format) {
+                    // Swap in the next decoder without stopping.
+                    decoder = std::move(next_decoder);
+                    next_decoder.reset();
+                    const std::filesystem::path np = std::move(next_path);
+                    next_path.clear();
+                    next_lk.unlock();
+                    frames_decoded.store(0, std::memory_order_relaxed);
+                    frames_written_at_track_start.store(
+                        frames_written.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+                    const Tags ntags = decoder->tags();
+                    const std::uint64_t ntotal = decoder->total_frames();
+                    // Update source stage so the snapshot reflects the new
+                    // track while the ring continues uninterrupted.
+                    {
+                        std::lock_guard lk(source_mtx);
+                        source_stage_.file_path = np.string();
+                        source_stage_.codec_name = codec_name_for_(np);
+                        source_stage_.container = container_for_(np);
+                        source_stage_.decoder_lib_version = decoder_lib_version_for_(np);
+                        source_stage_.bit_depth_file =
+                            static_cast<std::uint16_t>(
+                                sample_format_bytes_per_sample(fmt.sample_format) * 8u);
+                        source_stage_.channels = fmt.channels;
+                        source_stage_.sample_rate_hz = fmt.sample_rate_hz;
+                        source_stage_.total_frames = ntotal;
+                        source_stage_.tags = ntags;
+                        const double secs = decoder->duration_seconds();
+                        source_stage_.duration =
+                            std::chrono::milliseconds(
+                                static_cast<long long>(secs * 1000.0));
+                    }
+                    emit_track_loaded_(fmt, ntags, ntotal, np);
+                    if (trace_ring) {
+                        trace::Event tev{};
+                        tev.monotonic_ns = trace::monotonic_ns_now();
+                        tev.kind = trace::Kind::DecodeOpen;
+                        tev.large_a = fmt.sample_rate_hz;
+                        tev.large_b = fmt.channels;
+                        trace_ring->push(tev);
+                    }
+                    decode_state.store(DecodeState::Decoding, std::memory_order_relaxed);
+                    continue;
+                }
+                next_lk.unlock();
                 decoder_eof.store(true, std::memory_order_release);
                 decode_state.store(DecodeState::Eof, std::memory_order_relaxed);
                 if (trace_ring) {
@@ -490,6 +555,52 @@ struct Engine::Impl {
         }
     }
 
+    // Seek within the current track. Pauses the audio briefly (~10 ms), stops
+    // the decoder thread, re-creates the ring, seeks the decoder, then
+    // restarts the decoder thread. Called from the engine worker thread only.
+    void seek_frame_(std::uint64_t frame) {
+        if (!decoder || !ring) {
+            return;
+        }
+        const bool was_playing =
+            !audio_paused.load(std::memory_order_relaxed);
+
+        // Pause audio thread so it stops touching the ring.
+        audio_paused.store(true, std::memory_order_release);
+
+        // Stop the decoder thread.
+        decoder_run.store(false, std::memory_order_release);
+        run_cv.notify_all();
+        if (decoder_thread.joinable()) {
+            decoder_thread.join();
+        }
+
+        // Wait one audio-thread sleep cycle to ensure it has left ring->read().
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+
+        // Re-create ring: clean slate for the decoder thread to fill from the
+        // new position. Audio thread is in its pause loop and not touching it.
+        const std::size_t cap = ring->capacity();
+        ring = std::make_unique<SpscByteRing>(cap);
+        ring_fill_bytes.store(0, std::memory_order_relaxed);
+        ring_max_watermark.store(0, std::memory_order_relaxed);
+        decoder_eof.store(false, std::memory_order_release);
+
+        // Seek the decoder. Ignore error — worst case it stays at current pos.
+        (void)decoder->seek_frame(frame);
+
+        // Also update frames_written to reflect new position so the GUI
+        // progress bar matches.
+        frames_written.store(frame, std::memory_order_relaxed);
+
+        // Restart decoder thread.
+        decoder_run.store(true, std::memory_order_release);
+        decoder_thread = std::thread([this] { decoder_thread_fn_(); });
+
+        // Restore play/pause intent.
+        audio_paused.store(!was_playing, std::memory_order_release);
+    }
+
     // Tear down the active run cleanly: signal threads, join, release.
     // Caller (engine worker) must not be holding run_mtx.
     void teardown_run_() {
@@ -508,6 +619,12 @@ struct Engine::Impl {
         }
         decoder.reset();
         ring.reset();
+        // Drop any staged preload: the new run will preload fresh.
+        {
+            std::lock_guard nlk(next_mtx);
+            next_decoder.reset();
+            next_path.clear();
+        }
         decoder_eof.store(false, std::memory_order_release);
         audio_done.store(false, std::memory_order_release);
         audio_paused.store(false, std::memory_order_release);
@@ -643,6 +760,7 @@ struct Engine::Impl {
         // Reset session-wide counters for the new track.
         frames_decoded.store(0, std::memory_order_relaxed);
         frames_written.store(0, std::memory_order_relaxed);
+        frames_written_at_track_start.store(0, std::memory_order_relaxed);
         xrun_count.store(0, std::memory_order_relaxed);
         ring_max_watermark.store(0, std::memory_order_relaxed);
         ring_fill_bytes.store(0, std::memory_order_relaxed);
@@ -692,7 +810,7 @@ struct Engine::Impl {
         have_active_track = true;
         intent_paused_before_disconnect = false;
 
-        emit_track_loaded_(new_fmt, tags, total);
+        emit_track_loaded_(new_fmt, tags, total, src_path);
         emit_state_(State::Playing);
         return {};
     }
@@ -1060,6 +1178,11 @@ struct Engine::Impl {
                         emit_state_(State::Idle);
                     }
                     break;
+                case CmdKind::Seek:
+                    if (have_active_track) {
+                        seek_frame_(c.seek_frame);
+                    }
+                    break;
                 case CmdKind::DeviceRemoved:
                     if (active_fp_known &&
                         fingerprints_match_(active_fp, c.hp_fp)) {
@@ -1074,6 +1197,23 @@ struct Engine::Impl {
                         handle_device_added_(c.hp_card_index);
                     }
                     break;
+                case CmdKind::Preload:
+                    // Open the next-track decoder speculatively. If the
+                    // decoder thread is mid-run, it will pick this up at EOF.
+                    if (!c.path.empty() && std::filesystem::exists(c.path)) {
+                        if (auto nd = open_decoder(c.path); nd) {
+                            std::lock_guard nlk(next_mtx);
+                            next_decoder = std::move(*nd);
+                            next_path = c.path;
+                        }
+                    }
+                    break;
+                case CmdKind::CancelPreload: {
+                    std::lock_guard nlk(next_mtx);
+                    next_decoder.reset();
+                    next_path.clear();
+                    break;
+                }
                 case CmdKind::Shutdown:
                     return;
                 }
@@ -1251,6 +1391,9 @@ std::expected<void, Error> Engine::load(std::filesystem::path file) {
         return std::unexpected(Error{ErrorCode::FileOpenFailed,
                                      "no such file: " + file.string()});
     }
+    // Cancel any staged preload before the new Load so the worker doesn't
+    // race to swap in a stale next_decoder after teardown_run_() clears it.
+    impl_->post_cmd_(Impl::Cmd{Impl::CmdKind::CancelPreload, {}});
     impl_->post_cmd_(Impl::Cmd{Impl::CmdKind::Load, std::move(file)});
     return {};
 }
@@ -1268,6 +1411,27 @@ std::expected<void, Error> Engine::pause() {
 std::expected<void, Error> Engine::stop() {
     impl_->post_cmd_(Impl::Cmd{Impl::CmdKind::Stop, {}});
     return {};
+}
+
+std::expected<void, Error> Engine::seek(std::uint64_t frame) {
+    Impl::Cmd c{};
+    c.kind = Impl::CmdKind::Seek;
+    c.seek_frame = frame;
+    impl_->post_cmd_(std::move(c));
+    return {};
+}
+
+std::expected<void, Error> Engine::preload(std::filesystem::path file) {
+    if (!std::filesystem::exists(file)) {
+        return std::unexpected(Error{ErrorCode::FileOpenFailed,
+                                     "no such file: " + file.string()});
+    }
+    impl_->post_cmd_(Impl::Cmd{Impl::CmdKind::Preload, std::move(file)});
+    return {};
+}
+
+void Engine::cancel_preload() {
+    impl_->post_cmd_(Impl::Cmd{Impl::CmdKind::CancelPreload, {}});
 }
 
 State Engine::state() const noexcept {
@@ -1336,6 +1500,8 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
     // Live counters.
     s.output.frames_written =
         impl_->frames_written.load(std::memory_order_relaxed);
+    s.output.frames_written_at_track_start =
+        impl_->frames_written_at_track_start.load(std::memory_order_relaxed);
     s.output.xrun_count =
         impl_->xrun_count.load(std::memory_order_relaxed);
 

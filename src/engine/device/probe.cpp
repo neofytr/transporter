@@ -50,14 +50,6 @@ struct HwParamsFreer {
 };
 using HwParams = std::unique_ptr<snd_pcm_hw_params_t, HwParamsFreer>;
 
-struct MixerCloser {
-    void operator()(snd_mixer_t* m) const noexcept {
-        if (m) {
-            snd_mixer_close(m);
-        }
-    }
-};
-using MixerHandle = std::unique_ptr<snd_mixer_t, MixerCloser>;
 
 HwParams make_hw_params() {
     snd_pcm_hw_params_t* raw = nullptr;
@@ -100,29 +92,40 @@ std::string ctl_string_for_card(int card_index) {
     return s;
 }
 
-void probe_hw_volume(int card_index, VolumeControl& vc) {
+} // namespace  (end anonymous namespace)
+
+// open_mixer_elem is declared in device_internal.hpp; placed outside the
+// anonymous namespace so callers in other translation units can reference it
+// via detail::open_mixer_elem.
+std::pair<MixerHandle, snd_mixer_elem_t*>
+open_mixer_elem(int card_index) {
     snd_mixer_t* raw = nullptr;
     if (snd_mixer_open(&raw, 0) < 0) {
-        return;
+        return {};
     }
     MixerHandle mix{raw};
-
     const std::string ctl = ctl_string_for_card(card_index);
     if (snd_mixer_attach(mix.get(), ctl.c_str()) < 0) {
-        return;
+        return {};
     }
     if (snd_mixer_selem_register(mix.get(), nullptr, nullptr) < 0) {
-        return;
+        return {};
     }
     if (snd_mixer_load(mix.get()) < 0) {
-        return;
+        return {};
     }
-
     snd_mixer_elem_t* elem = find_volume_element(mix.get());
     if (elem == nullptr) {
+        return {};
+    }
+    return {std::move(mix), elem};
+}
+
+void probe_hw_volume(int card_index, VolumeControl& vc) {
+    auto [mix, elem] = open_mixer_elem(card_index);
+    if (!mix || !elem) {
         return;
     }
-
     vc.present = true;
     snd_mixer_selem_id_t* sid = nullptr;
     snd_mixer_selem_id_alloca(&sid);
@@ -131,7 +134,6 @@ void probe_hw_volume(int card_index, VolumeControl& vc) {
     if (nm != nullptr) {
         vc.element_name = nm;
     }
-
     long min_db = 0;
     long max_db = 0;
     if (snd_mixer_selem_get_playback_dB_range(elem, &min_db, &max_db) == 0) {
@@ -175,8 +177,6 @@ void merge_extra_rates(snd_pcm_t* pcm, snd_pcm_hw_params_t* hwp,
 
     std::sort(rates.begin(), rates.end());
 }
-
-} // namespace
 
 std::expected<ParsedHwString, Error> parse_hw_string(const std::string& hw_string) {
     // Accept "hw:CARD=<id>,DEV=<n>" or "hw:<n>,<m>".
@@ -248,6 +248,12 @@ DeviceCapabilities probe_device(const std::string& alsa_hw_string) {
             caps.probe_failure_reason = std::string{"snd_pcm_open: "} +
                                         snd_strerror(open_err);
         }
+        // The mixer control device is separate from the PCM device; probe HW
+        // volume even when the PCM is busy (e.g. held exclusively by us).
+        auto parsed = parse_hw_string(alsa_hw_string);
+        if (parsed) {
+            probe_hw_volume(parsed->card_index, caps.hw_volume);
+        }
         return caps;
     }
     PcmHandle pcm{raw};
@@ -290,3 +296,71 @@ DeviceCapabilities probe_device(const std::string& alsa_hw_string) {
 }
 
 } // namespace transporter::engine::detail
+
+namespace transporter::engine {
+
+namespace {
+// Shared mixer-open used by the three public volume helpers below.
+// Returns card_index=-1 on parse failure.
+int card_index_from_hw(const std::string& alsa_hw_string) {
+    auto parsed = detail::parse_hw_string(alsa_hw_string);
+    return parsed ? parsed->card_index : -1;
+}
+} // namespace
+
+int get_hw_volume_pct(const std::string& alsa_hw_string) {
+    const int ci = card_index_from_hw(alsa_hw_string);
+    if (ci < 0) {
+        return -1;
+    }
+    auto [mix, elem] = detail::open_mixer_elem(ci);
+    if (!mix || !elem) {
+        return -1;
+    }
+    long min_vol = 0, max_vol = 0;
+    snd_mixer_selem_get_playback_volume_range(elem, &min_vol, &max_vol);
+    if (max_vol == min_vol) {
+        return -1;
+    }
+    long cur = min_vol;
+    snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_FRONT_LEFT, &cur);
+    const int pct = static_cast<int>(
+        100LL * (cur - min_vol) / (max_vol - min_vol));
+    return pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+}
+
+void set_hw_volume_pct(const std::string& alsa_hw_string, int pct) {
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    const int ci = card_index_from_hw(alsa_hw_string);
+    if (ci < 0) {
+        return;
+    }
+    auto [mix, elem] = detail::open_mixer_elem(ci);
+    if (!mix || !elem) {
+        return;
+    }
+    long min_vol = 0, max_vol = 0;
+    snd_mixer_selem_get_playback_volume_range(elem, &min_vol, &max_vol);
+    const long target = min_vol + static_cast<long>(pct) * (max_vol - min_vol) / 100L;
+    snd_mixer_selem_set_playback_volume_all(elem, target);
+}
+
+void toggle_hw_mute(const std::string& alsa_hw_string) {
+    const int ci = card_index_from_hw(alsa_hw_string);
+    if (ci < 0) {
+        return;
+    }
+    auto [mix, elem] = detail::open_mixer_elem(ci);
+    if (!mix || !elem) {
+        return;
+    }
+    if (!snd_mixer_selem_has_playback_switch(elem)) {
+        return;
+    }
+    int sw = 0;
+    snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_FRONT_LEFT, &sw);
+    snd_mixer_selem_set_playback_switch_all(elem, sw ? 0 : 1);
+}
+
+} // namespace transporter::engine

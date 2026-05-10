@@ -56,11 +56,6 @@ bool init_wayland(WindowImpl& w) {
     }
     wl_registry_add_listener(w.registry, &kRegistryListener, &w);
 
-    // First roundtrip: collect globals advertised at startup.
-    if (wl_display_roundtrip(w.display) < 0) {
-        return false;
-    }
-    // Second roundtrip: lets seat capabilities arrive after the seat is bound.
     if (wl_display_roundtrip(w.display) < 0) {
         return false;
     }

@@ -61,8 +61,9 @@ struct OutputStage {
     std::uint32_t periods = 0;
     std::uint32_t buffer_size_frames = 0;
     PcmFormat hw_params_set{};
-    std::uint64_t frames_written = 0;           // session-wide
-    std::uint32_t xrun_count = 0;               // session-wide
+    std::uint64_t frames_written = 0;                  // session-wide
+    std::uint64_t frames_written_at_track_start = 0;   // baseline for current track
+    std::uint32_t xrun_count = 0;                      // session-wide
 };
 
 struct DeviceStage {

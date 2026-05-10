@@ -386,6 +386,30 @@ void Scanner::walk_root(Db& db, const fs::path& root,
                 : static_cast<std::int64_t>(
                       (total_frames * 1000ULL) / fmt.sample_rate_hz);
 
+        // Canonical album artist: explicit tag wins; otherwise strip feat./collab
+        // suffixes so collaborative tracks group under the primary artist's album.
+        auto split_primary = [](const std::string& artist) -> std::string {
+            static constexpr const char* kSep[] = {
+                " featuring ", " feat. ", " feat ", " ft. ", " ft ",
+                " vs. ", " vs ", " & ", " x ",
+            };
+            std::string lc;
+            lc.reserve(artist.size());
+            for (char c : artist) {
+                lc.push_back(c >= 'A' && c <= 'Z'
+                                 ? static_cast<char>(c + ('a' - 'A')) : c);
+            }
+            for (const char* sep : kSep) {
+                if (auto pos = lc.find(sep); pos != std::string::npos) {
+                    return artist.substr(0, pos);
+                }
+            }
+            return artist;
+        };
+        const std::string album_artist =
+            !tags.album_artist.empty() ? tags.album_artist
+                                       : split_primary(tags.artist);
+
         // Upsert track and remember album/artist linkage.
         begin_txn();
 
@@ -400,8 +424,7 @@ void Scanner::walk_root(Db& db, const fs::path& root,
             bind_text(*stmt, 2,  tags.title);
             bind_text(*stmt, 3,  tags.artist);
             bind_text(*stmt, 4,  tags.album);
-            // album_artist not in Tags struct yet; fall back to artist.
-            bind_text(*stmt, 5,  tags.artist);
+            bind_text(*stmt, 5,  album_artist);
             bind_text(*stmt, 6,  tags.track_no);
             bind_text(*stmt, 7,  tags.date);
             bind_text(*stmt, 8,  codec);
@@ -423,13 +446,57 @@ void Scanner::walk_root(Db& db, const fs::path& root,
             continue;
         }
 
-        // Artist + album_artist rows.
-        if (!tags.artist.empty()) {
+        // Upsert artist rows: the full track artist string AND any individual
+        // artists extracted by splitting on collaborative separators.
+        auto upsert_artist_name = [&](const std::string& name) {
+            if (name.empty()) return;
             auto stmt = db.prepare(queries::upsert_artist);
             if (stmt) {
-                bind_text(*stmt, 1, tags.artist);
+                bind_text(*stmt, 1, name);
                 (void)sqlite3_step(*stmt);
                 sqlite3_reset(*stmt);
+            }
+        };
+        // Insert the canonical album artist. If the track artist differs
+        // (e.g. "Artist A feat. Artist B"), also insert the album_artist (primary)
+        // but NOT the full collaborative string — that would create a phantom artist.
+        // Optionally extract the featured artist and insert them too.
+        upsert_artist_name(album_artist);
+        if (album_artist != tags.artist) {
+            // Try to extract the featured artist(s) from the full track artist.
+            const std::string& full = tags.artist;
+            const std::string& prim_lc = [&]() -> const std::string& {
+                // album_artist is already primary; build its lowercase version inline
+                static thread_local std::string lc;
+                lc.clear();
+                lc.reserve(album_artist.size());
+                for (char c : album_artist) {
+                    lc.push_back(c >= 'A' && c <= 'Z'
+                                     ? static_cast<char>(c + ('a' - 'A')) : c);
+                }
+                return lc;
+            }();
+            (void)prim_lc;
+            // Everything after the separator is the featured part.
+            static constexpr const char* kSep[] = {
+                " featuring ", " feat. ", " feat ", " ft. ", " ft ",
+                " vs. ", " vs ", " & ", " x ",
+            };
+            std::string full_lc;
+            full_lc.reserve(full.size());
+            for (char c : full) {
+                full_lc.push_back(c >= 'A' && c <= 'Z'
+                                      ? static_cast<char>(c + ('a' - 'A')) : c);
+            }
+            for (const char* sep : kSep) {
+                auto pos = full_lc.find(sep);
+                if (pos != std::string::npos) {
+                    const std::size_t after = pos + std::strlen(sep);
+                    if (after < full.size()) {
+                        upsert_artist_name(full.substr(after));
+                    }
+                    break;
+                }
             }
         }
 
@@ -442,7 +509,7 @@ void Scanner::walk_root(Db& db, const fs::path& root,
                     continue;
                 }
                 bind_text(*stmt, 1, tags.album);
-                bind_text(*stmt, 2, tags.artist); // album_artist fallback
+                bind_text(*stmt, 2, album_artist); // use canonical album artist
                 bind_text(*stmt, 3, tags.date);
                 if (sqlite3_step(*stmt) == SQLITE_ROW) {
                     album_id = sqlite3_column_int64(*stmt, 0);

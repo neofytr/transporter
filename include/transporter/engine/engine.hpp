@@ -82,6 +82,7 @@ struct Event {
     Tags tags{};                    // TrackLoaded
     std::uint64_t total_frames{0};  // TrackLoaded
     Error error{ErrorCode::DeviceOpenFailed, ""};  // ErrorOccurred
+    std::filesystem::path file_path{};  // TrackLoaded: path of the loaded file
 };
 
 using EventCallback = std::function<void(const Event&)>;
@@ -116,6 +117,20 @@ public:
     std::expected<void, Error> play();
     std::expected<void, Error> pause();
     std::expected<void, Error> stop();
+    // Seek to a PCM frame offset within the current track. Non-blocking;
+    // actual seek completes on the engine worker thread (~12 ms latency).
+    std::expected<void, Error> seek(std::uint64_t frame);
+
+    // Open the next decoder in the background without disturbing the active
+    // run. On current-track EOF, if the preloaded format exactly matches the
+    // live format, the decoder thread swaps in next_decoder seamlessly and
+    // continues filling the ring without stopping. Format mismatch or missing
+    // preload falls through to the normal TrackEnded path.
+    std::expected<void, Error> preload(std::filesystem::path file);
+
+    // Cancel any pending preload (called when the user explicitly loads a
+    // different track before the current one ends).
+    void cancel_preload();
 
     State state() const noexcept;
     PcmFormat current_format() const noexcept;

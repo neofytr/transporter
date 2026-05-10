@@ -179,4 +179,32 @@ std::expected<Config, Error> load_file(const std::filesystem::path& path) {
     return parse(os.str());
 }
 
+void save_device_preferred(const std::filesystem::path& path,
+                           const std::string& hw_string) {
+    toml::table tbl;
+    {
+        std::ifstream f(path);
+        if (f) {
+            try {
+                std::ostringstream os;
+                os << f.rdbuf();
+                tbl = toml::parse(os.str());
+            } catch (...) {
+                // corrupt file; start fresh
+            }
+        }
+    }
+    if (!tbl.contains("device")) {
+        tbl.insert("device", toml::table{});
+    }
+    tbl["device"].as_table()->insert_or_assign("preferred", hw_string);
+
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::trunc);
+    if (out) {
+        out << tbl;
+    }
+}
+
 } // namespace transporter::config

@@ -88,6 +88,9 @@ void parse_vorbis_comment(const FLAC__StreamMetadata_VorbisComment& vc, Tags& ou
         }
         if (keylc == "artist") {
             out.artist.assign(val);
+        } else if (keylc == "albumartist" || keylc == "album_artist" ||
+                   keylc == "album artist") {
+            out.album_artist.assign(val);
         } else if (keylc == "album") {
             out.album.assign(val);
         } else if (keylc == "title") {

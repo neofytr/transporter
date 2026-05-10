@@ -37,8 +37,16 @@ struct AppState {
 
     std::string preferred_device;     // last applied --device or [device].preferred
     std::vector<engine::DeviceInfo> devices;
+    std::string pending_device_switch; // set by DAC combo; cleared after switch
+    bool release_dac_requested = false; // set by "Release DAC" button; cleared after teardown
+
+    // Cached HW volume (0-100, -1 = unavailable). Polled at ~4 Hz from main thread.
+    int hw_volume_pct = -1;
+    bool hw_volume_muted = false;
+    std::chrono::steady_clock::time_point hw_volume_last_poll{};
 
     std::filesystem::path queued_file;  // launch arg, played once
+    std::filesystem::path pending_preload_path; // path passed to last preload()
 
     // In-process queue. Phase 10 keeps it minimal: command-line file lands
     // here on launch, OpenUri appends, MPRIS Next/Previous walks it. Index
@@ -63,10 +71,23 @@ struct AppState {
     void push_log(std::string text);
     std::vector<LogEntry> snapshot_log(std::size_t max = 12) const;
 
+    // Transient error toast shown at the top of the main view.
+    struct Toast {
+        std::string msg;
+        std::chrono::steady_clock::time_point expires;
+    };
+    std::optional<Toast> toast;
+    std::mutex toast_mtx;
+
+    // Thread-safe. Replaces any existing toast.
+    void push_toast(std::string msg, float seconds = 4.0f);
+
     // Queue helpers; called from any thread (DBus event-loop in particular).
     std::optional<std::filesystem::path> queue_next();
     std::optional<std::filesystem::path> queue_previous();
     void queue_set_single(std::filesystem::path p);
+    // Returns the path after the current index without advancing it.
+    std::optional<std::filesystem::path> queue_peek_next() const;
 };
 
 // Each draw_* fn renders a single ImGui window's contents within the current

@@ -12,10 +12,12 @@
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/library/library.hpp>
+#include <transporter/theme/theme.hpp>
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -92,6 +94,16 @@ std::string pick_device(const config::Config& cfg,
 
 } // namespace
 
+void AppState::push_toast(std::string msg, float seconds) {
+    std::lock_guard lk(toast_mtx);
+    toast = Toast{
+        std::move(msg),
+        std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<float>(seconds)),
+    };
+}
+
 void AppState::push_log(std::string text) {
     std::lock_guard lk(log_mtx);
     log.push_back(LogEntry{std::chrono::steady_clock::now(), std::move(text)});
@@ -139,6 +151,18 @@ void AppState::queue_set_single(std::filesystem::path p) {
     queue_index = 0;
 }
 
+std::optional<std::filesystem::path> AppState::queue_peek_next() const {
+    std::lock_guard lk(const_cast<std::mutex&>(queue_mtx));
+    if (queue.empty()) {
+        return std::nullopt;
+    }
+    const std::int32_t next = queue_index + 1;
+    if (next < 0 || next >= static_cast<std::int32_t>(queue.size())) {
+        return std::nullopt;
+    }
+    return queue[static_cast<std::size_t>(next)];
+}
+
 namespace {
 
 void wire_engine_events(AppState& st) {
@@ -159,9 +183,35 @@ void wire_engine_events(AppState& st) {
                           event_kind_name(ev.kind),
                           ev.format.sample_rate_hz, ev.format.channels,
                           static_cast<unsigned long long>(ev.total_frames));
+            // If the loaded file matches the preloaded path, a gapless swap
+            // just occurred: advance queue_index to reflect the new position.
+            if (!st.pending_preload_path.empty() &&
+                ev.file_path == st.pending_preload_path) {
+                std::lock_guard lk(st.queue_mtx);
+                if (st.queue_index + 1 <
+                        static_cast<std::int32_t>(st.queue.size())) {
+                    ++st.queue_index;
+                }
+            }
+            st.pending_preload_path.clear();
+            // Speculatively open the next decoder so it is ready at EOF.
+            if (st.engine_ != nullptr) {
+                if (auto peek = st.queue_peek_next(); peek) {
+                    st.pending_preload_path = *peek;
+                    (void)st.engine_->preload(*peek);
+                }
+            }
             break;
         case engine::Event::Kind::TrackEnded:
             std::snprintf(line, sizeof(line), "%s", event_kind_name(ev.kind));
+            // Gapless swap already happened in the decoder thread if formats
+            // matched; TrackEnded fires only on format mismatch or when no
+            // preload was staged — advance queue and reload normally.
+            if (auto next = st.queue_next(); next) {
+                if (st.engine_->load(*next)) {
+                    (void)st.engine_->play();
+                }
+            }
             break;
         case engine::Event::Kind::RateSwitched:
             std::snprintf(line, sizeof(line), "%s -> %u Hz",
@@ -172,6 +222,7 @@ void wire_engine_events(AppState& st) {
                           event_kind_name(ev.kind),
                           std::string(engine::error_code_name(ev.error.code)).c_str(),
                           ev.error.message.c_str());
+            st.push_toast(ev.error.message);
             break;
         case engine::Event::Kind::DeviceLost:
         case engine::Event::Kind::DeviceReturn:
@@ -213,13 +264,21 @@ void open_engine_and_library(AppState& st, const AppArgs& args) {
     st.preferred_device = pick_device(st.cfg, args.device_override, st.devices);
 
     // engine
-    if (!st.preferred_device.empty()) {
+    if (st.preferred_device.empty()) {
+        std::fprintf(stderr, "transporter: no playback device found "
+                     "(%zu device(s) enumerated)\n", st.devices.size());
+        st.push_log("no playback device selected");
+    } else {
         engine::EngineConfig ec{};
         ec.device_id = st.preferred_device;
+        std::fprintf(stderr, "transporter: opening %s\n",
+                     st.preferred_device.c_str());
         if (auto e = engine::Engine::create(std::move(ec)); e) {
             st.engine_ = std::move(*e);
             wire_engine_events(st);
         } else {
+            std::fprintf(stderr, "transporter: engine create failed: %s\n",
+                         e.error().message.c_str());
             st.push_log(std::string{"engine create failed: "} + e.error().message);
         }
     }
@@ -353,12 +412,100 @@ int run(const AppArgs& args) {
     }
     auto& win = **win_or;
 
-    open_engine_and_library(st, args);
-    open_dbus_service(st);
+    {
+        const char* home = std::getenv("HOME");
+        const auto hypr_conf = std::filesystem::path{home ? home : ""} /
+                               ".config/hypr/hyprland.conf";
+        const auto t = theme::Theme::load(hypr_conf);
+        theme::apply_to_imgui(t);
+    }
+
+    // Engine, library, and DBus start on a background thread. The Wayland
+    // event loop runs from the very first frame so compositor pings are
+    // answered and the window stays responsive during libasound / DBus init.
+    std::atomic<bool> backend_ready{false};
+    std::thread backend_thread([&]() {
+        open_engine_and_library(st, args);
+        open_dbus_service(st);
+        backend_ready.store(true, std::memory_order_release);
+    });
+
     bool queued_done = false;
 
     while (win.poll()) {
-        if (!queued_done) {
+        const bool ready = backend_ready.load(std::memory_order_acquire);
+
+        // Hot DAC switch requested from the combo box
+        if (ready && !st.pending_device_switch.empty()) {
+            const std::string new_dev = std::move(st.pending_device_switch);
+            st.pending_device_switch.clear();
+
+            // Remember what was playing so we can reload on the new device.
+            std::filesystem::path reload_path;
+            if (st.engine_) {
+                auto snap = st.engine_->pipeline_snapshot();
+                if (!snap.source.file_path.empty()) {
+                    reload_path = snap.source.file_path;
+                }
+            }
+            if (reload_path.empty()) {
+                std::lock_guard lk(st.queue_mtx);
+                if (st.queue_index >= 0 &&
+                    st.queue_index < static_cast<std::int32_t>(st.queue.size())) {
+                    reload_path = st.queue[static_cast<std::size_t>(st.queue_index)];
+                }
+            }
+
+            // DBus borrows raw Engine*; tear it down first to avoid
+            // dangling-pointer dereference on the event-loop thread.
+            if (st.dbus_) {
+                st.dbus_->shutdown();
+                st.dbus_.reset();
+            }
+            if (st.engine_) {
+                st.engine_->stop();
+                st.engine_.reset();
+            }
+            engine::EngineConfig ec{};
+            ec.device_id = new_dev;
+            if (auto e = engine::Engine::create(std::move(ec)); e) {
+                st.engine_ = std::move(*e);
+                wire_engine_events(st);
+                st.push_log("switched to: " + new_dev);
+                if (!reload_path.empty()) {
+                    if (auto lr = st.engine_->load(reload_path); lr) {
+                        st.engine_->play();
+                        st.push_log("loaded: " + reload_path.string());
+                    } else {
+                        st.push_log("reload failed: " + lr.error().message);
+                    }
+                }
+            } else {
+                st.push_log("switch failed: " + e.error().message);
+            }
+            st.preferred_device = new_dev;
+            st.cfg.device.preferred = new_dev;
+            if (!st.config_path.empty()) {
+                config::save_device_preferred(st.config_path, new_dev);
+            }
+            open_dbus_service(st);
+        }
+
+        // "Release DAC" button: stop engine and drop exclusive ALSA hold.
+        if (ready && st.release_dac_requested) {
+            st.release_dac_requested = false;
+            if (st.dbus_) {
+                st.dbus_->shutdown();
+                st.dbus_.reset();
+            }
+            if (st.engine_) {
+                st.engine_->stop();
+                st.engine_.reset();
+            }
+            st.push_log("DAC released — exclusive hold dropped");
+        }
+
+        if (ready && !queued_done) {
             queued_done = maybe_play_queued_file(st);
         }
 
@@ -374,19 +521,25 @@ int run(const AppArgs& args) {
             ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
         ImGui::Begin("##transporter", nullptr, kFlags);
 
-        draw_tab_bar(st);
-        handle_view_shortcuts(st);
+        if (!ready) {
+            ImGui::TextDisabled("Initializing...");
+        } else {
+            draw_tab_bar(st);
+            handle_view_shortcuts(st);
 
-        switch (st.current_view) {
-        case ViewId::Main:     draw_main_view(st);     break;
-        case ViewId::Library:  draw_library_view(st);  break;
-        case ViewId::Pipeline: draw_pipeline_view(st); break;
+            switch (st.current_view) {
+            case ViewId::Main:     draw_main_view(st);     break;
+            case ViewId::Library:  draw_library_view(st);  break;
+            case ViewId::Pipeline: draw_pipeline_view(st); break;
+            }
         }
 
         ImGui::End();
 
         win.end_frame(0.07f, 0.08f, 0.10f);
     }
+
+    backend_thread.join();
     return 0;
 }
 

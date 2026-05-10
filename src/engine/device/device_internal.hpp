@@ -9,8 +9,12 @@
 #include <transporter/engine/device.hpp>
 #include <transporter/engine/error.hpp>
 
+#include <alsa/asoundlib.h>
+
 #include <expected>
+#include <memory>
 #include <string>
+#include <utility>
 
 namespace transporter::engine::detail {
 
@@ -47,6 +51,18 @@ int alsa_card_index_from_kernel(const char* kernel_name);
 // caps.caps_probe_failed=true (with reason) on -EBUSY or any open-time
 // error so the GUI can render "in use by another app".
 DeviceCapabilities probe_device(const std::string& alsa_hw_string);
+
+struct MixerCloser {
+    void operator()(snd_mixer_t* m) const noexcept {
+        if (m) { snd_mixer_close(m); }
+    }
+};
+using MixerHandle = std::unique_ptr<snd_mixer_t, MixerCloser>;
+
+// Open the ALSA simple mixer for the given card and return the first matching
+// playback-volume element. Returns {null, null} on any failure.
+// The MixerHandle must remain alive while the element pointer is used.
+std::pair<MixerHandle, snd_mixer_elem_t*> open_mixer_elem(int card_index);
 
 } // namespace transporter::engine::detail
 

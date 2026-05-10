@@ -20,6 +20,7 @@ namespace transporter::engine {
 // file's stamp as written, year only when the file only stored a year.
 struct Tags {
     std::string artist;
+    std::string album_artist; // ALBUMARTIST / TPE2; empty → fall back to artist
     std::string album;
     std::string title;
     std::string track_no;

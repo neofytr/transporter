@@ -76,6 +76,11 @@ parse(std::string_view toml_text);
 std::expected<Config, transporter::engine::Error>
 load_file(const std::filesystem::path& path);
 
+// Update [device].preferred in the config file at `path`. Creates the file
+// and parent directories if they do not exist. Preserves existing keys.
+void save_device_preferred(const std::filesystem::path& path,
+                           const std::string& hw_string);
+
 } // namespace transporter::config
 
 #endif

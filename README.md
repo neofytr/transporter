@@ -4,74 +4,113 @@ A minimal, bit-perfect Linux music player.
 
 Bare-metal ALSA-direct playback. No sound server in the audio path, no resampling, no DSP, no software volume on the bit-perfect path. Wayland-native, Hyprland-themed.
 
-## Status
+## Features
 
-Pre-implementation. Design is settled; code is on the way.
+- Bit-perfect ALSA-direct output (`hw:` device, no PipeWire / PulseAudio in path)
+- Hard exclusive device ownership — kernel-level lock, no sharing
+- Format auto-detection: FLAC, WAV, AIFF, MP3, Ogg Vorbis, Opus, ALAC (M4A)
+- Native sample-rate switching — DAC follows the track, no resampling ever
+- Real-time audio thread (`SCHED_FIFO` priority 80, `mlockall`, CPU affinity)
+- Hyprland theme integration — reads `~/.config/hypr/hyprland.conf` at startup
+- Pipeline view — live per-stage telemetry: formats, ring fill, xrun count, RT mode, bit-perfect verdict with per-condition breakdown
+- MPRIS (`org.mpris.MediaPlayer2`) for media-key and D-Bus control
+- SQLite-backed library with background scanner
 
-- `docs/architecture.md` — runtime design (modules, threads, public engine API).
-- `docs/phases.md` — implementation phases with goals and acceptance criteria.
-- `docs/spec/locked.md` — formal specification with rationale for every decision.
+## Dependencies
+
+Install on Debian / Ubuntu:
+
+```
+sudo apt install \
+  meson ninja-build pkg-config \
+  libflac-dev libmpg123-dev libvorbis-dev libopus-dev \
+  libasound2-dev \
+  libwayland-dev libwayland-egl-backend-dev wayland-protocols \
+  libegl-dev libgl-dev libxkbcommon-dev \
+  libdbus-1-dev \
+  libsqlite3-dev
+```
+
+Dear ImGui, toml++, doctest, and the Apple ALAC decoder are bundled under `third_party/`.
 
 ## Build
 
-Pending Phase 0 — Meson + Ninja.
-
 ```
 meson setup build
-meson compile -C build
-./build/transporter --version
+ninja -C build
+```
+
+The binary is at `build/transporter`.
+
+To install system-wide:
+
+```
+sudo ninja -C build install
 ```
 
 ## Realtime audio (recommended)
 
 For lowest-jitter playback the audio thread runs `SCHED_FIFO` priority 80 with
-`mlockall` and CPU affinity. By default the kernel does not grant unprivileged
-processes RT scheduling. The standard fix on Debian / Ubuntu / Arch is to add
-the user to the `audio` group and bump RT / memlock limits:
+`mlockall` and CPU affinity. The kernel does not grant unprivileged processes RT
+scheduling by default. Fix on Debian / Ubuntu / Arch:
 
-    sudo gpasswd -a "$USER" audio
-    sudo install -m 0644 packaging/limits-transporter.conf \
-         /etc/security/limits.d/99-transporter.conf
+```
+sudo gpasswd -a "$USER" audio
+```
 
-The supplied `packaging/limits-transporter.conf`:
+Create `/etc/security/limits.d/99-transporter.conf`:
 
-    @audio  -  rtprio  95
-    @audio  -  memlock unlimited
+```
+@audio  -  rtprio  95
+@audio  -  memlock unlimited
+```
 
-Log out and back in for the new group / limits to apply. transporter will
-detect the granted capability at startup and run RT; otherwise it falls back
-to `SCHED_OTHER` + `nice -10` and reports the actual mode in the Pipeline view.
+Log out and back in. transporter detects the granted capability at startup and runs
+RT; otherwise it falls back to `SCHED_OTHER` and reports the actual scheduling mode
+in the Pipeline view.
 
-## Bit-perfect verification (snd-aloop loopback)
+## Usage
 
-To prove end-to-end bit-perfect output, transporter can play through ALSA's
-virtual loopback card and capture the result for byte-comparison against
-the source.
+```
+transporter [OPTIONS] [FILE]
+```
 
-    sudo modprobe snd-aloop                  # load the loopback driver
-    aplay -L | grep -i loopback              # confirm Loopback card appears
+Play a file directly:
 
-The verification harness:
+```
+transporter /path/to/track.flac
+```
 
-    ./build/tests/integration/test_bit_perfect_loopback \
-        Loopback fixtures/sine_44100_16.wav
-    ./build/tests/integration/test_bit_perfect_loopback \
-        Loopback fixtures/sine_96000_24.wav
-    ./build/tests/integration/test_bit_perfect_loopback \
-        Loopback fixtures/sine_192000_24.wav
+Open with no file to use the library browser.
 
-Each invocation must exit 0. A non-zero exit means the digital path mutated
-the bytes between source and capture — that is a bug, file an issue.
+Pin a specific DAC (useful when multiple output devices are present):
 
-Stress test (5 minutes; assume PipeWire has been paused on the target DAC):
+```
+transporter --device hw:CARD=Topping_E70,DEV=0 /path/to/track.flac
+```
 
-    # terminal 1: drive playback
-    ./build/tests/integration/test_xrun_stress hw:CARD=DAC,DEV=0 300
-    # terminal 2: load the system
-    stress-ng --cpu $(($(nproc) - 1)) --vm 2 --vm-bytes 256M --io 2 --timeout 5m
+Run without a GUI (headless, exits when playback ends):
 
-A tuned RT setup should report `xrun_total <= 1`; without RT, expect
-multiple xruns.
+```
+transporter --no-gui /path/to/track.flac
+```
+
+### Config file
+
+`~/.config/transporter/config.toml` — created on first run if absent.
+
+Minimal example:
+
+```toml
+[device]
+preferred = "hw:CARD=Topping_E70,DEV=0"
+
+[library]
+roots = ["/home/user/Music"]
+
+[dbus]
+enabled = true
+```
 
 ## License
 

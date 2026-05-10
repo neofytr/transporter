@@ -65,6 +65,8 @@ void parse_vorbis_comment(vorbis_comment* vc, Tags& out) {
         const std::string_view val = s.substr(eq + 1);
         if (keylc == "artist") {
             out.artist.assign(val);
+        } else if (keylc == "albumartist" || keylc == "album_artist") {
+            out.album_artist.assign(val);
         } else if (keylc == "album") {
             out.album.assign(val);
         } else if (keylc == "title") {

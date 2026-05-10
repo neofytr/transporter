@@ -35,6 +35,7 @@ void play_track(AppState& st, const library::Track& t) {
         st.push_log("cannot play: no engine");
         return;
     }
+    st.queue_set_single(t.path);
     auto r = st.engine_->load(t.path);
     if (!r) {
         st.push_log(std::string{"load failed: "} + r.error().message);
@@ -45,6 +46,33 @@ void play_track(AppState& st, const library::Track& t) {
         st.push_log(std::string{"play failed: "} + p.error().message);
     } else {
         st.push_log(std::string{"playing: "} + t.path.string());
+    }
+}
+
+void play_album(AppState& st, const std::vector<library::Track>& album_tracks,
+                std::size_t idx) {
+    if (st.engine_ == nullptr) {
+        st.push_log("cannot play: no engine");
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(st.queue_mtx);
+        st.queue.clear();
+        for (const auto& t : album_tracks) {
+            st.queue.push_back(t.path);
+        }
+        st.queue_index = static_cast<std::int32_t>(idx);
+    }
+    auto r = st.engine_->load(album_tracks[idx].path);
+    if (!r) {
+        st.push_log(std::string{"load failed: "} + r.error().message);
+        return;
+    }
+    auto p = st.engine_->play();
+    if (!p) {
+        st.push_log(std::string{"play failed: "} + p.error().message);
+    } else {
+        st.push_log(std::string{"playing: "} + album_tracks[idx].path.string());
     }
 }
 
@@ -134,7 +162,8 @@ void draw_library_view(AppState& st) {
                             st.selected_album_id = al.id;
                         }
                         if (auto tracks = st.library_->tracks_in_album(al.id); tracks) {
-                            for (const auto& t : *tracks) {
+                            for (std::size_t ti = 0; ti < tracks->size(); ++ti) {
+                                const auto& t = (*tracks)[ti];
                                 char row[256];
                                 std::snprintf(row, sizeof(row), "%s. %s  [%u Hz / %u-bit]",
                                               t.track_no.empty() ? "-" : t.track_no.c_str(),
@@ -143,7 +172,7 @@ void draw_library_view(AppState& st) {
                                 if (ImGui::Selectable(row, false,
                                                       ImGuiSelectableFlags_AllowDoubleClick)) {
                                     if (ImGui::IsMouseDoubleClicked(0)) {
-                                        play_track(st, t);
+                                        play_album(st, *tracks, ti);
                                     }
                                 }
                             }

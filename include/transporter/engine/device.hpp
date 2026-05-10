@@ -85,6 +85,15 @@ std::expected<DeviceInfo, Error> describe_device(const std::string& alsa_hw_stri
 // Sanitization: characters outside [a-zA-Z0-9._-] are replaced with '_'.
 std::string make_stable_id(const DeviceFingerprint& fp);
 
+// HW volume helpers. Operate on the ALSA control device (separate from the
+// PCM device; safe to call while the PCM is held open exclusively).
+// alsa_hw_string must be in "hw:CARD=<name>,DEV=<n>" form.
+// Returns -1 when the control is unavailable.
+int get_hw_volume_pct(const std::string& alsa_hw_string);
+// No-op when hw_volume is absent. pct is clamped to [0, 100].
+void set_hw_volume_pct(const std::string& alsa_hw_string, int pct);
+void toggle_hw_mute(const std::string& alsa_hw_string);
+
 } // namespace transporter::engine
 
 #endif

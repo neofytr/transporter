@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 
 // Forward declarations of the three GL symbols we touch directly. Defined by
 // libGL (or libEGL via OpenGL ES); imgui_impl_opengl3 already pulls in its
@@ -80,6 +81,13 @@ Window::create(const WindowConfig& cfg) {
 
     register_seat(s);
 
+    // Seat capabilities arrive after the listener is attached; this
+    // roundtrip ensures the pointer and keyboard objects are created
+    // before we bring up the surface.
+    if (wl_display_roundtrip(s.display) < 0) {
+        return std::unexpected(InitError::MissingProtocol);
+    }
+
     if (!init_surface(s, cfg.title)) {
         return std::unexpected(InitError::MissingProtocol);
     }
@@ -93,6 +101,19 @@ Window::create(const WindowConfig& cfg) {
     ImGui::StyleColorsDark();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;  // do not write imgui.ini to the cwd
+
+    // Load JetBrainsMono Nerd Font at 17px for a clean, readable size.
+    // Fall back to the built-in bitmap font at 15px if unavailable.
+    constexpr const char* kFont =
+        "/home/raj/.local/share/fonts/JetBrainsMono/"
+        "JetBrainsMonoNerdFont-Regular.ttf";
+    if (std::filesystem::exists(kFont)) {
+        io.Fonts->AddFontFromFileTTF(kFont, 17.0f);
+    } else {
+        ImFontConfig cfg;
+        cfg.SizePixels = 15.0f;
+        io.Fonts->AddFontDefault(&cfg);
+    }
     io.DisplaySize = ImVec2(static_cast<float>(s.width),
                             static_cast<float>(s.height));
     if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
