@@ -67,6 +67,30 @@ std::string sanitize_for_id(const std::string& in) {
 
 namespace detail {
 
+namespace {
+
+void fingerprint_from_dev_(struct udev_device* dev, DeviceFingerprint& fp) {
+    if (dev == nullptr) {
+        return;
+    }
+    struct udev_device* usb_parent =
+        udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_device");
+    if (usb_parent == nullptr) {
+        return;
+    }
+
+    const char* vid = udev_device_get_sysattr_value(usb_parent, "idVendor");
+    const char* pid = udev_device_get_sysattr_value(usb_parent, "idProduct");
+    const char* serial = udev_device_get_sysattr_value(usb_parent, "serial");
+
+    fp.is_usb = true;
+    fp.usb_vendor_id = lower_hex(vid);
+    fp.usb_product_id = lower_hex(pid);
+    fp.usb_serial = serial != nullptr ? std::string{serial} : std::string{};
+}
+
+} // namespace
+
 void populate_usb_fingerprint(int card_index, DeviceFingerprint& fp) {
     UdevHandle udev{udev_new()};
     if (!udev) {
@@ -81,23 +105,35 @@ void populate_usb_fingerprint(int card_index, DeviceFingerprint& fp) {
     if (!dev) {
         return;
     }
+    fingerprint_from_dev_(dev.get(), fp);
+}
 
-    // Walk up parent chain looking for subsystem=usb / devtype=usb_device.
-    // udev_device_get_parent_with_subsystem_devtype does this in one call.
-    struct udev_device* usb_parent = udev_device_get_parent_with_subsystem_devtype(
-        dev.get(), "usb", "usb_device");
-    if (usb_parent == nullptr) {
-        return;
+void populate_usb_fingerprint_from_udev_device(void* udev_dev, DeviceFingerprint& fp) {
+    fingerprint_from_dev_(static_cast<struct udev_device*>(udev_dev), fp);
+}
+
+int alsa_card_index_from_kernel(const char* kernel_name) {
+    if (kernel_name == nullptr) {
+        return -1;
     }
-
-    const char* vid = udev_device_get_sysattr_value(usb_parent, "idVendor");
-    const char* pid = udev_device_get_sysattr_value(usb_parent, "idProduct");
-    const char* serial = udev_device_get_sysattr_value(usb_parent, "serial");
-
-    fp.is_usb = true;
-    fp.usb_vendor_id = lower_hex(vid);
-    fp.usb_product_id = lower_hex(pid);
-    fp.usb_serial = serial != nullptr ? std::string{serial} : std::string{};
+    // Find the first 'C' that is followed by digits. Matches controlCN,
+    // pcmCNDMp, midiCNDM, hwCNDM, etc.
+    for (const char* p = kernel_name; *p != '\0'; ++p) {
+        if (*p != 'C') {
+            continue;
+        }
+        const char* d = p + 1;
+        if (*d < '0' || *d > '9') {
+            continue;
+        }
+        int n = 0;
+        while (*d >= '0' && *d <= '9') {
+            n = n * 10 + (*d - '0');
+            ++d;
+        }
+        return n;
+    }
+    return -1;
 }
 
 } // namespace detail

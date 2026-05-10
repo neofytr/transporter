@@ -69,6 +69,13 @@ struct DeviceStage {
     DeviceFingerprint fingerprint;
     DeviceCapabilities capabilities;
     std::string current_hw_string;
+    // Hotplug state. is_connected reflects whether the engine has the
+    // active DAC open right now; false while in Disconnected. The
+    // timestamp is the last steady_clock::now() at which a Removed event
+    // matched the active fingerprint; default-constructed (zero TP) when
+    // the engine has never observed a disconnect this session.
+    bool is_connected = true;
+    std::chrono::steady_clock::time_point last_disconnected_at{};
 };
 
 struct RealtimeStage {

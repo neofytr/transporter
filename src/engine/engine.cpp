@@ -22,6 +22,7 @@
 #include <transporter/engine/engine.hpp>
 
 #include "alsa_device.hpp"
+#include "device/device_internal.hpp"
 #include "engine_test_access.hpp"
 #include "output_iface.hpp"
 
@@ -35,6 +36,9 @@
 #include <transporter/engine/rt.hpp>
 #include <transporter/engine/telemetry.hpp>
 #include <transporter/engine/trace.hpp>
+#include <transporter/hotplug/monitor.hpp>
+
+#include <poll.h>
 
 #include <algorithm>
 #include <array>
@@ -127,11 +131,17 @@ struct Engine::Impl {
     std::mutex cb_mtx;
     EventCallback cb;
 
-    // Command queue (API → engine worker)
-    enum class CmdKind : std::uint8_t { Load, Play, Pause, Stop, Shutdown };
+    // Command queue (API → engine worker, plus hotplug watcher → worker)
+    enum class CmdKind : std::uint8_t {
+        Load, Play, Pause, Stop, Shutdown,
+        DeviceRemoved, DeviceAdded,
+    };
     struct Cmd {
         CmdKind kind;
         std::filesystem::path path;
+        // Hotplug command payload. Filled for DeviceRemoved / DeviceAdded.
+        DeviceFingerprint hp_fp{};
+        int hp_card_index{-1};
     };
     std::mutex cmd_mtx;
     std::condition_variable cmd_cv;
@@ -140,6 +150,33 @@ struct Engine::Impl {
 
     // Engine worker thread
     std::thread worker;
+
+    // Hotplug watcher: polls monitor->fd() with a 100 ms timeout, drains
+    // events, and posts DeviceRemoved/DeviceAdded commands. The watcher does
+    // not touch FSM state; the worker thread owns transitions.
+    std::unique_ptr<hotplug::IMonitor> hp_monitor;
+    std::thread hp_watcher;
+    std::atomic<bool> hp_run{false};
+
+    // Active DAC fingerprint, captured at create() from describe_device().
+    // Empty .alsa_card_longname + non-USB => no fingerprint capture
+    // (typical for tests with empty device_id; hotplug then no-ops).
+    DeviceFingerprint active_fp;
+    bool active_fp_known{false};
+
+    // Connection bookkeeping for the snapshot's DeviceStage.
+    std::atomic<bool> device_connected{true};
+    mutable std::mutex disc_mtx;
+    std::chrono::steady_clock::time_point last_disconnected_at{};
+
+    // Pre-disconnect intent: was the engine paused before the DAC vanished?
+    // Restored on same-DAC return so a user-paused track resumes paused.
+    bool intent_paused_before_disconnect{false};
+
+    // Active track context (file path + last-known matched format) so we can
+    // re-open after reconnect. Set on load, cleared on stop / EOF.
+    std::filesystem::path active_path;
+    bool have_active_track{false};
 
     // Active playback runtime (engine worker owns these)
     std::unique_ptr<IDecoder> decoder;
@@ -196,6 +233,45 @@ struct Engine::Impl {
         ev.kind = Event::Kind::ErrorOccurred;
         ev.error = std::move(e);
         post_event_(std::move(ev));
+    }
+    void emit_device_lost_() {
+        Event ev;
+        ev.kind = Event::Kind::DeviceLost;
+        post_event_(std::move(ev));
+    }
+    void emit_device_return_() {
+        Event ev;
+        ev.kind = Event::Kind::DeviceReturn;
+        post_event_(std::move(ev));
+    }
+
+    // Match by USB triple when available; fall back to ALSA card longname.
+    // Empty fingerprint never matches (avoids false positives on non-USB
+    // setups where udev may not give us identifiers in time).
+    static bool fingerprints_match_(const DeviceFingerprint& a,
+                                    const DeviceFingerprint& b) noexcept {
+        if (a.is_usb && b.is_usb) {
+            if (a.usb_vendor_id.empty() || a.usb_product_id.empty() ||
+                b.usb_vendor_id.empty() || b.usb_product_id.empty()) {
+                return false;
+            }
+            if (a.usb_vendor_id != b.usb_vendor_id ||
+                a.usb_product_id != b.usb_product_id) {
+                return false;
+            }
+            // Serial is the discriminator when both present; absent on
+            // either side => identical model wins (best we can do).
+            if (!a.usb_serial.empty() && !b.usb_serial.empty()) {
+                return a.usb_serial == b.usb_serial;
+            }
+            return true;
+        }
+        // Non-USB: compare longname/cardname.
+        const std::string& la =
+            a.alsa_card_longname.empty() ? a.alsa_card_name : a.alsa_card_longname;
+        const std::string& lb =
+            b.alsa_card_longname.empty() ? b.alsa_card_name : b.alsa_card_longname;
+        return !la.empty() && la == lb;
     }
 
     void post_cmd_(Cmd c) {
@@ -612,9 +688,196 @@ struct Engine::Impl {
         decoder_thread = std::thread([this] { decoder_thread_fn_(); });
         audio_thread = std::thread([this] { audio_thread_fn_(); });
 
+        active_path = src_path;
+        have_active_track = true;
+        intent_paused_before_disconnect = false;
+
         emit_track_loaded_(new_fmt, tags, total);
         emit_state_(State::Playing);
         return {};
+    }
+
+    // Disconnect path. Active DAC fingerprint just removed. Tear down the
+    // audio side cleanly (drop+close the device, stop audio thread), keep
+    // the decoder paused with its position preserved, transition state to
+    // Disconnected. Decoder thread itself stays alive but pauses on
+    // audio_paused; that ring buffer continues to hold whatever was
+    // pre-buffered. We do NOT reset session counters: telemetry across the
+    // disconnect/reconnect cycle should be coherent.
+    void handle_device_removed_() {
+        const State s = state.load(std::memory_order_acquire);
+        if (s != State::Playing && s != State::Paused) {
+            return;
+        }
+        intent_paused_before_disconnect = (s == State::Paused);
+
+        // Stop the audio thread; close the device. Keep decoder thread alive
+        // but paused so the ring keeps its tail position.
+        audio_paused.store(true, std::memory_order_release);
+        audio_run.store(false, std::memory_order_release);
+        run_cv.notify_all();
+        if (audio_thread.joinable()) {
+            audio_thread.join();
+        }
+        if (output) {
+            output->drop_and_close();
+            output.reset();
+        }
+        device_connected.store(false, std::memory_order_release);
+        {
+            std::lock_guard lk(disc_mtx);
+            last_disconnected_at = std::chrono::steady_clock::now();
+        }
+        if (trace_ring) {
+            trace::Event ev{};
+            ev.monotonic_ns = trace::monotonic_ns_now();
+            ev.kind = trace::Kind::DeviceLost;
+            (void)trace_ring->push(ev);
+        }
+        emit_device_lost_();
+        emit_state_(State::Disconnected);
+    }
+
+    // Reconnect path. Same fingerprint just reappeared (possibly under a
+    // different ALSA card index). Re-resolve the hw string from the new
+    // card index, re-probe caps, re-open the device for the in-flight
+    // format, restart the audio thread. If the new caps no longer cover
+    // the current format -> emit FormatNotSupported, transition to Idle,
+    // tear down.
+    void handle_device_added_(int new_card_index) {
+        if (state.load(std::memory_order_acquire) != State::Disconnected) {
+            return;
+        }
+        if (!have_active_track || !decoder) {
+            // Nothing was playing — ignore. Should not normally happen
+            // since handle_device_removed_ requires Playing/Paused.
+            return;
+        }
+
+        // Real-device path: list playback devices and resolve a fresh
+        // hw:CARD=...,DEV=N string for the new card index. The new IDevice
+        // is bound to that string. Tests don't take this branch — their
+        // injected IDevice isn't an AlsaDevice; we keep the existing one
+        // and just call open()/probe_caps() against it again.
+        const bool is_real_alsa =
+            dynamic_cast<detail::AlsaDevice*>(device.get()) != nullptr;
+        if (is_real_alsa) {
+            int wanted_dev = 0;
+            if (auto p = detail::parse_hw_string(cfg.device_id); p) {
+                wanted_dev = p->device_index;
+            }
+            std::string new_hw;
+            DeviceFingerprint new_fp;
+            if (auto all = list_playback_devices(); all) {
+                for (const auto& d : *all) {
+                    if (d.alsa_card_index == new_card_index &&
+                        d.alsa_device_index == wanted_dev) {
+                        new_hw = d.alsa_hw_string;
+                        new_fp = d.fingerprint;
+                        break;
+                    }
+                }
+                if (new_hw.empty()) {
+                    for (const auto& d : *all) {
+                        if (d.alsa_card_index == new_card_index) {
+                            new_hw = d.alsa_hw_string;
+                            new_fp = d.fingerprint;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (new_hw.empty()) {
+                // Reconnect candidate didn't materialise as a PCM playback
+                // device. Stay in Disconnected — a follow-up Added may
+                // resolve once udev settles.
+                return;
+            }
+            device = std::make_unique<detail::AlsaDevice>(new_hw);
+            cfg.device_id = new_hw;
+            if (active_fp_known && new_fp.is_usb) {
+                active_fp = new_fp;
+            }
+        } else {
+            (void)new_card_index;
+        }
+
+        // Always re-probe caps after a reopen (firmware may have changed).
+        auto probed = device->probe_caps();
+        if (!probed) {
+            emit_error_(probed.error());
+            // Probe failed: tear down the run; reset to Idle.
+            teardown_run_();
+            have_active_track = false;
+            emit_state_(State::Idle);
+            return;
+        }
+        caps = std::move(*probed);
+
+        // Verify the in-flight format still fits the new caps.
+        const PcmFormat want = decoder->format();
+        auto matched = match(want, caps.view());
+        if (!matched) {
+            emit_error_(matched.error());
+            teardown_run_();
+            have_active_track = false;
+            emit_state_(State::Idle);
+            return;
+        }
+
+        detail::OpenOpts oopts{};
+        oopts.target_period_ms = target_period_ms_();
+        oopts.periods_target = 4u;
+        oopts.xrun_cb = [this](int e) noexcept { on_xrun_(e); };
+        auto out = device->open(*matched, oopts);
+        if (!out) {
+            emit_error_(out.error());
+            teardown_run_();
+            have_active_track = false;
+            emit_state_(State::Idle);
+            return;
+        }
+        output = std::move(*out);
+
+        const auto pi = output->period_info();
+        if (trace_ring) {
+            trace::Event ev{};
+            ev.monotonic_ns = trace::monotonic_ns_now();
+            ev.kind = trace::Kind::DeviceReturn;
+            ev.large_a = matched->sample_rate_hz;
+            ev.large_b = pi.period_frames;
+            ev.large_c = pi.periods;
+            (void)trace_ring->push(ev);
+        }
+
+        // Update the static output stage / format-match for the snapshot.
+        // hw string and fingerprint were already refreshed above on the
+        // real-ALSA branch.
+        {
+            std::lock_guard lk(source_mtx);
+            output_stage_static_.period_size_frames = pi.period_frames;
+            output_stage_static_.periods = pi.periods;
+            output_stage_static_.buffer_size_frames = pi.buffer_frames;
+            output_stage_static_.hw_params_set = *matched;
+            format_match_stage_.matched = *matched;
+            format_match_stage_.matched_ok = true;
+            format_match_stage_.device_format_set = caps.formats;
+            format_match_stage_.device_rate_set = caps.rates;
+        }
+
+        device_connected.store(true, std::memory_order_release);
+
+        // Restart audio thread.
+        audio_run.store(true, std::memory_order_release);
+        audio_paused.store(intent_paused_before_disconnect,
+                           std::memory_order_release);
+        audio_done.store(false, std::memory_order_release);
+        audio_error.store(false, std::memory_order_release);
+        audio_thread = std::thread([this] { audio_thread_fn_(); });
+
+        emit_device_return_();
+        emit_state_(intent_paused_before_disconnect ? State::Paused
+                                                    : State::Playing);
     }
 
     static std::string codec_name_for_(const std::filesystem::path& p) {
@@ -668,6 +931,11 @@ struct Engine::Impl {
     void check_run_finish_() {
         // Called periodically by the worker. If the audio thread has signaled
         // done or error, finalize the run.
+        if (state.load(std::memory_order_acquire) == State::Disconnected) {
+            // Audio thread has been stopped intentionally; the audio_done
+            // flag is irrelevant in this state.
+            return;
+        }
         if (audio_done.load(std::memory_order_acquire) ||
             audio_error.load(std::memory_order_acquire)) {
             const bool errored = audio_error.load(std::memory_order_acquire);
@@ -678,8 +946,67 @@ struct Engine::Impl {
             }
             emit_state_(State::Stopped);
             teardown_run_();
+            have_active_track = false;
             emit_state_(State::Idle);
         }
+    }
+
+    // Hotplug watcher loop. Polls monitor->fd() with a 100 ms timeout.
+    // When events arrive, drains them and posts DeviceRemoved / DeviceAdded
+    // commands for the engine worker to interpret. Filters here are
+    // deliberately minimal: only fingerprint matching happens on the worker
+    // (so all FSM logic runs on a single thread).
+    void hp_watcher_fn_() {
+        if (!hp_monitor) {
+            return;
+        }
+        const int fd = hp_monitor->fd();
+        std::array<hotplug::DeviceEvent, 8> batch{};
+        while (hp_run.load(std::memory_order_acquire)) {
+            if (fd >= 0) {
+                struct pollfd pfd{};
+                pfd.fd = fd;
+                pfd.events = POLLIN;
+                const int rc = ::poll(&pfd, 1, 100);
+                if (rc < 0) {
+                    // EINTR or similar — retry
+                    continue;
+                }
+                if (rc == 0) {
+                    continue; // timeout; loop
+                }
+            } else {
+                // No fd (mock with no pipe) — fall back to short sleep poll.
+                std::this_thread::sleep_for(50ms);
+            }
+            const std::size_t n = hp_monitor->poll(
+                std::span<hotplug::DeviceEvent>(batch.data(), batch.size()));
+            for (std::size_t i = 0; i < n; ++i) {
+                Cmd cmd{};
+                cmd.kind = batch[i].kind == hotplug::EventKind::Removed
+                               ? CmdKind::DeviceRemoved
+                               : CmdKind::DeviceAdded;
+                cmd.hp_fp = std::move(batch[i].fingerprint);
+                cmd.hp_card_index = batch[i].alsa_card_index;
+                post_cmd_(std::move(cmd));
+            }
+        }
+    }
+
+    void start_hotplug_(std::unique_ptr<hotplug::IMonitor> mon) {
+        if (!mon) {
+            return;
+        }
+        hp_monitor = std::move(mon);
+        hp_run.store(true, std::memory_order_release);
+        hp_watcher = std::thread([this] { hp_watcher_fn_(); });
+    }
+    void stop_hotplug_() noexcept {
+        hp_run.store(false, std::memory_order_release);
+        if (hp_watcher.joinable()) {
+            hp_watcher.join();
+        }
+        hp_monitor.reset();
     }
 
     void worker_fn_() {
@@ -703,22 +1030,48 @@ struct Engine::Impl {
                     (void)open_track_(c.path);
                     break;
                 case CmdKind::Play:
-                    if (output) {
+                    if (state.load(std::memory_order_acquire) ==
+                        State::Disconnected) {
+                        // Honour user intent: when they hit play during a
+                        // disconnect, remember it so reconnection resumes
+                        // playing rather than paused.
+                        intent_paused_before_disconnect = false;
+                    } else if (output) {
                         audio_paused.store(false, std::memory_order_release);
                         emit_state_(State::Playing);
                     }
                     break;
                 case CmdKind::Pause:
-                    if (output) {
+                    if (state.load(std::memory_order_acquire) ==
+                        State::Disconnected) {
+                        intent_paused_before_disconnect = true;
+                    } else if (output) {
                         audio_paused.store(true, std::memory_order_release);
                         emit_state_(State::Paused);
                     }
                     break;
                 case CmdKind::Stop:
-                    if (output) {
+                    if (state.load(std::memory_order_acquire) ==
+                            State::Disconnected ||
+                        output) {
                         emit_state_(State::Stopped);
                         teardown_run_();
+                        have_active_track = false;
                         emit_state_(State::Idle);
+                    }
+                    break;
+                case CmdKind::DeviceRemoved:
+                    if (active_fp_known &&
+                        fingerprints_match_(active_fp, c.hp_fp)) {
+                        handle_device_removed_();
+                    }
+                    break;
+                case CmdKind::DeviceAdded:
+                    if (state.load(std::memory_order_acquire) ==
+                            State::Disconnected &&
+                        active_fp_known &&
+                        fingerprints_match_(active_fp, c.hp_fp)) {
+                        handle_device_added_(c.hp_card_index);
                     }
                     break;
                 case CmdKind::Shutdown:
@@ -784,11 +1137,14 @@ struct Engine::Impl {
 
     Impl() = default;
     ~Impl() {
+        // Stop hotplug watcher first so it can't post commands into a
+        // worker that's about to drain.
+        stop_hotplug_();
         // Signal worker.
         {
             std::lock_guard lk(cmd_mtx);
             stop_worker = true;
-            cmds.push_back(Cmd{CmdKind::Shutdown, {}});
+            cmds.push_back(Cmd{CmdKind::Shutdown, {}, {}, -1});
         }
         cmd_cv.notify_all();
         if (worker.joinable()) {
@@ -811,30 +1167,82 @@ std::expected<std::unique_ptr<Engine>, Error> Engine::create(EngineConfig cfg) {
     if (!caps) {
         return std::unexpected(caps.error());
     }
+    // Resolve the active DAC fingerprint up front so hotplug events can be
+    // matched without a re-probe round-trip. describe_device may fail if
+    // the device disappears between probe and describe; that's fine — we
+    // simply skip fingerprint capture and the engine never enters
+    // Disconnected for this session.
+    DeviceFingerprint active_fp_local{};
+    bool active_fp_known_local = false;
+    if (auto desc = describe_device(cfg.device_id); desc) {
+        active_fp_local = desc->fingerprint;
+        active_fp_known_local = true;
+    }
+
+    HotplugFactory factory = std::move(cfg.hotplug_factory);
     auto e = std::unique_ptr<Engine>(new Engine());
     e->impl_->cfg = std::move(cfg);
     e->impl_->device = std::move(dev);
     e->impl_->caps = std::move(*caps);
+    e->impl_->active_fp = std::move(active_fp_local);
+    e->impl_->active_fp_known = active_fp_known_local;
     e->impl_->state.store(State::Idle, std::memory_order_release);
     e->impl_->start_trace_();
     e->impl_->worker = std::thread([impl = e->impl_.get()] { impl->worker_fn_(); });
+
+    // Default factory: real udev monitor. Tests inject their own factory
+    // (mock) via EngineConfig::hotplug_factory. If the factory returns
+    // nullptr (or open_udev_monitor fails on a system without udev access)
+    // we silently disable hotplug.
+    std::unique_ptr<hotplug::IMonitor> mon;
+    if (factory) {
+        mon = factory();
+    } else {
+        if (auto m = hotplug::open_udev_monitor(); m) {
+            mon = std::move(*m);
+        }
+    }
+    if (mon) {
+        e->impl_->start_hotplug_(std::move(mon));
+    }
     return e;
 }
 
 std::expected<std::unique_ptr<Engine>, Error>
 EngineTestHooks::create_with_device(EngineConfig cfg,
                                     std::unique_ptr<detail::IDevice> dev) {
+    return create_with_device_fp(std::move(cfg), std::move(dev),
+                                 DeviceFingerprint{});
+}
+
+std::expected<std::unique_ptr<Engine>, Error>
+EngineTestHooks::create_with_device_fp(EngineConfig cfg,
+                                       std::unique_ptr<detail::IDevice> dev,
+                                       DeviceFingerprint active_fp) {
     auto caps = dev->probe_caps();
     if (!caps) {
         return std::unexpected(caps.error());
     }
+    HotplugFactory factory = std::move(cfg.hotplug_factory);
     auto e = std::unique_ptr<Engine>(new Engine());
     e->impl_->cfg = std::move(cfg);
     e->impl_->device = std::move(dev);
     e->impl_->caps = std::move(*caps);
+    e->impl_->active_fp = std::move(active_fp);
+    e->impl_->active_fp_known =
+        e->impl_->active_fp.is_usb ||
+        !e->impl_->active_fp.alsa_card_longname.empty() ||
+        !e->impl_->active_fp.alsa_card_name.empty();
     e->impl_->state.store(State::Idle, std::memory_order_release);
     e->impl_->start_trace_();
     e->impl_->worker = std::thread([impl = e->impl_.get()] { impl->worker_fn_(); });
+
+    // Tests pass an explicit factory or none. No real udev probe in tests.
+    if (factory) {
+        if (auto mon = factory(); mon) {
+            e->impl_->start_hotplug_(std::move(mon));
+        }
+    }
     return e;
 }
 
@@ -959,7 +1367,21 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
             s.device.current_hw_string = desc->alsa_hw_string;
         } else {
             s.device.current_hw_string = impl_->cfg.device_id;
+            // describe_device failed: usually because the device just
+            // vanished. Surface the cached active fingerprint so the GUI
+            // doesn't lose all identification while disconnected.
+            if (impl_->active_fp_known) {
+                s.device.fingerprint = impl_->active_fp;
+            }
         }
+    } else if (impl_->active_fp_known) {
+        s.device.fingerprint = impl_->active_fp;
+    }
+    s.device.is_connected =
+        impl_->device_connected.load(std::memory_order_acquire);
+    {
+        std::lock_guard lk(impl_->disc_mtx);
+        s.device.last_disconnected_at = impl_->last_disconnected_at;
     }
 
     // Realtime stage.
@@ -992,7 +1414,11 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
     v.volume_unity = true;
 
     using L = BitPerfectVerdict::Level;
-    if (!v.digital_path_bitperfect || !v.no_mismatch_in_flight) {
+    const bool disconnected = !s.device.is_connected;
+    if (disconnected) {
+        v.level = L::No;
+        v.qualifications.push_back("DAC currently disconnected");
+    } else if (!v.digital_path_bitperfect || !v.no_mismatch_in_flight) {
         v.level = L::No;
     } else if (v.rt_enabled && v.no_recent_xrun && v.volume_unity) {
         v.level = L::Yes;

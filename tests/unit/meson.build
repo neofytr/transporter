@@ -111,3 +111,14 @@ test('pipeline_snapshot',
   test_pipeline_snapshot,
   args : [meson.project_source_root() / 'fixtures' / 'sine_44100_16.flac'],
 )
+
+test_hotplug_fsm = executable(
+  'test_hotplug_fsm',
+  'hotplug_fsm.cpp',
+  include_directories : engine_internal_inc,
+  dependencies : [engine_dep, hotplug_dep],
+)
+test('hotplug_fsm',
+  test_hotplug_fsm,
+  args : [meson.project_source_root() / 'fixtures' / 'sine_44100_16.flac'],
+)

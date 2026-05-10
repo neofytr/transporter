@@ -63,7 +63,6 @@ transporter_modules = [
   library_lib,
   theme_lib,
   dbus_lib,
-  hotplug_lib,
   config_lib,
   gui_lib,
 ]

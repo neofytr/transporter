@@ -18,11 +18,21 @@
 #include <ostream>
 #include <string>
 
+namespace transporter::hotplug {
+class IMonitor;
+} // namespace transporter::hotplug
+
 namespace transporter::engine {
 
 // Lifecycle states. The engine never re-enters Loading from Idle without an
 // explicit load() call. Stopped is a transient sink that returns to Idle once
 // teardown completes; consumers may observe it via StateChanged.
+//
+// Disconnected is functionally Paused (audio thread stopped, output closed)
+// but reported separately so the GUI can render a "DAC disconnected" badge.
+// The engine remembers whether the user had explicitly paused before the
+// disconnect: on same-DAC return, that intent is preserved (Paused vs.
+// Playing).
 enum class State : std::uint8_t {
     Idle,
     Loading,
@@ -30,7 +40,15 @@ enum class State : std::uint8_t {
     Paused,
     Stopped,
     Error,
+    Disconnected,
 };
+
+// Factory for the hotplug monitor. Default (empty factory) constructs the
+// real udev monitor. Tests inject a mock. Returning a null pointer disables
+// hotplug entirely (engine never enters Disconnected). move-only because
+// callers commonly capture a unique_ptr<IMonitor> they prepared up front.
+using HotplugFactory =
+    std::move_only_function<std::unique_ptr<transporter::hotplug::IMonitor>()>;
 
 // Construction-time configuration. ring_capacity_bytes is rounded up to the
 // next power of two (SpscByteRing requirement). target_latency is advisory
@@ -39,6 +57,10 @@ struct EngineConfig {
     std::string device_id;
     std::size_t ring_capacity_bytes = 1u << 20;
     std::chrono::milliseconds target_latency{50};
+    // Hotplug monitor factory. Empty = real libudev monitor (Engine::create
+    // resolves to open_udev_monitor()). Tests inject a mock; tests that
+    // don't care about hotplug pass a factory that returns nullptr.
+    HotplugFactory hotplug_factory;
 };
 
 // Asynchronous notification from the engine. Delivered on the engine's worker
@@ -51,6 +73,8 @@ struct Event {
         TrackEnded,
         RateSwitched,
         ErrorOccurred,
+        DeviceLost,    // active DAC disconnected; engine -> Disconnected
+        DeviceReturn,  // active DAC reconnected; engine resumes prior intent
     };
     Kind kind{Kind::StateChanged};
     State state{State::Idle};       // StateChanged

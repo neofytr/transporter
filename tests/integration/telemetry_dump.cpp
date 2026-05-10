@@ -25,12 +25,13 @@ namespace {
 
 const char* state_name(tp::State s) noexcept {
     switch (s) {
-    case tp::State::Idle:    return "Idle";
-    case tp::State::Loading: return "Loading";
-    case tp::State::Playing: return "Playing";
-    case tp::State::Paused:  return "Paused";
-    case tp::State::Stopped: return "Stopped";
-    case tp::State::Error:   return "Error";
+    case tp::State::Idle:         return "Idle";
+    case tp::State::Loading:      return "Loading";
+    case tp::State::Playing:      return "Playing";
+    case tp::State::Paused:       return "Paused";
+    case tp::State::Stopped:      return "Stopped";
+    case tp::State::Error:        return "Error";
+    case tp::State::Disconnected: return "Disconnected";
     }
     return "?";
 }

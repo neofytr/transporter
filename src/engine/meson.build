@@ -35,6 +35,7 @@ engine_sources = files(
   'format/match.cpp',
   'rt/apply.cpp',
   'trace/ring.cpp',
+  '../hotplug/udev_monitor.cpp',
 )
 
 engine_internal_inc = include_directories('.')

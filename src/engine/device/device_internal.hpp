@@ -30,6 +30,18 @@ std::expected<ParsedHwString, Error> parse_hw_string(const std::string& hw_strin
 // non-USB cards are normal.
 void populate_usb_fingerprint(int card_index, DeviceFingerprint& fp);
 
+// Variant for an already-resolved udev_device pointing at a sound-class
+// node. Hotplug monitor uses this to fingerprint the device delivered by
+// the netlink event without re-opening a udev_new context. The pointer is
+// declared as void* to keep this header free of <libudev.h>; callers cast
+// from struct udev_device*.
+void populate_usb_fingerprint_from_udev_device(void* udev_dev, DeviceFingerprint& fp);
+
+// Parse the ALSA card index from a sound-class kernel name. Accepts
+// "controlC<N>", "pcmC<N>D<M>{p,c}", "midiC<N>D<M>", "hwC<N>D<M>", etc.
+// Returns -1 when the name doesn't carry a card index.
+int alsa_card_index_from_kernel(const char* kernel_name);
+
 // Open the PCM, run the format/rate/channel probe, then probe HW volume
 // via the simple-mixer API. Cleans up on every path. Sets
 // caps.caps_probe_failed=true (with reason) on -EBUSY or any open-time

@@ -8,6 +8,7 @@
 
 #include "output_iface.hpp"
 
+#include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/error.hpp>
 
@@ -19,6 +20,13 @@ namespace transporter::engine {
 struct EngineTestHooks {
     static std::expected<std::unique_ptr<Engine>, Error>
     create_with_device(EngineConfig cfg, std::unique_ptr<detail::IDevice> dev);
+
+    // Variant that also pins the active fingerprint so hotplug tests can
+    // drive Disconnected/return cycles without a real ALSA card.
+    static std::expected<std::unique_ptr<Engine>, Error>
+    create_with_device_fp(EngineConfig cfg,
+                          std::unique_ptr<detail::IDevice> dev,
+                          DeviceFingerprint active_fp);
 };
 
 } // namespace transporter::engine
