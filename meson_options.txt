@@ -1,0 +1,22 @@
+# LTO is driven by Meson's built-in option `b_lto` (default: false).
+# Enable with: meson setup build -Db_lto=true
+# Kept as the built-in to avoid drift with the toolchain integration Meson
+# already provides for it.
+
+option(
+  'native_arch',
+  type : 'boolean',
+  value : false,
+  description : 'Compile with -march=native -mtune=native. Off by default: portable binaries; on for best local performance.',
+)
+
+option(
+  'sanitizer',
+  type : 'combo',
+  choices : ['none', 'address', 'undefined', 'address,undefined', 'thread'],
+  value : 'none',
+  description : 'Enable a runtime sanitizer for development builds.',
+)
+
+# `-Werror` is driven by Meson's built-in option `werror` (default: false).
+# Enable with: meson setup build -Dwerror=true

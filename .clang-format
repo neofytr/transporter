@@ -1,0 +1,47 @@
+---
+# LLVM base, lightly tuned: 4-space indent, 100-col, pointer-left, sorted includes by group.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+ColumnLimit: 100
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+SpaceAfterTemplateKeyword: true
+SpacesBeforeTrailingComments: 1
+FixNamespaceComments: true
+ShortNamespaceLines: 0
+IncludeBlocks: Regroup
+SortIncludes: CaseSensitive
+IncludeCategories:
+  - Regex: '^<transporter/'
+    Priority: 1
+  - Regex: '^".*"$'
+    Priority: 2
+  - Regex: '^<.*\.h(pp)?>$'
+    Priority: 3
+  - Regex: '^<.*>$'
+    Priority: 4
+EmptyLineBeforeAccessModifier: LogicalBlock
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignTrailingComments: true
+BinPackArguments: false
+BinPackParameters: false
+PackConstructorInitializers: NextLine
+ConstructorInitializerIndentWidth: 4
+Cpp11BracedListStyle: true
