@@ -11,6 +11,7 @@
 #include <linux/input-event-codes.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 
 #include <cstring>
 
@@ -185,6 +186,19 @@ void keyboard_key(void* data, wl_keyboard* /*k*/, uint32_t /*serial*/,
         if (n > 0 && static_cast<unsigned char>(buf[0]) >= 0x20
             && buf[0] != 0x7F) {
             io.AddInputCharactersUTF8(buf);
+        }
+
+        // XF86 media keys
+        switch (sym) {
+        case XKB_KEY_XF86AudioPlay:
+        case XKB_KEY_XF86AudioPause:       w.media_play_pause.store(true); break;
+        case XKB_KEY_XF86AudioStop:        w.media_stop.store(true);       break;
+        case XKB_KEY_XF86AudioNext:        w.media_next.store(true);       break;
+        case XKB_KEY_XF86AudioPrev:        w.media_prev.store(true);       break;
+        case XKB_KEY_XF86AudioMute:        w.media_mute.store(true);       break;
+        case XKB_KEY_XF86AudioRaiseVolume: w.media_vol_up.store(true);     break;
+        case XKB_KEY_XF86AudioLowerVolume: w.media_vol_down.store(true);   break;
+        default: break;
         }
     }
 }

@@ -8,6 +8,7 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -75,6 +76,15 @@ struct WindowImpl {
     // Keyboard repeat
     int32_t repeat_rate     = 25;
     int32_t repeat_delay_ms = 600;
+
+    // XF86 media key flags — set by input thread, cleared by GUI after reading
+    std::atomic<bool> media_play_pause{false};
+    std::atomic<bool> media_stop{false};
+    std::atomic<bool> media_next{false};
+    std::atomic<bool> media_prev{false};
+    std::atomic<bool> media_mute{false};
+    std::atomic<bool> media_vol_up{false};
+    std::atomic<bool> media_vol_down{false};
 
     // Font atlas (CPU-side; populated on first render call)
     const uint8_t* font_pixels   = nullptr;

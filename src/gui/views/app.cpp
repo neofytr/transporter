@@ -593,6 +593,51 @@ int run(const AppArgs& args) {
             queued_done = maybe_play_queued_file(st);
         }
 
+        if (ready) {
+            if (win.take_media_play_pause() && st.engine_) {
+                const auto s = st.last_engine_state.load(std::memory_order_relaxed);
+                if (s == engine::State::Playing) (void)st.engine_->pause();
+                else                             (void)st.engine_->play();
+            }
+            if (win.take_media_stop() && st.engine_)
+                (void)st.engine_->stop();
+            if (win.take_media_next() && st.engine_) {
+                if (auto n = st.queue_next(); n) {
+                    (void)st.engine_->load(*n);
+                    (void)st.engine_->play();
+                }
+            }
+            if (win.take_media_prev() && st.engine_) {
+                if (auto p = st.queue_previous(); p) {
+                    (void)st.engine_->load(*p);
+                    (void)st.engine_->play();
+                }
+            }
+            if (win.take_media_mute()) {
+                const auto& hw = st.engine_
+                    ? st.engine_->pipeline_snapshot().device.current_hw_string : std::string{};
+                if (!hw.empty()) engine::toggle_hw_mute(hw);
+            }
+            {
+                const bool vol_up   = win.take_media_vol_up();
+                const bool vol_down = win.take_media_vol_down();
+                if (vol_up || vol_down) {
+                    const auto& hw = st.engine_
+                        ? st.engine_->pipeline_snapshot().device.current_hw_string
+                        : std::string{};
+                    if (!hw.empty()) {
+                        int pct = engine::get_hw_volume_pct(hw);
+                        if (pct >= 0) {
+                            pct = std::clamp(pct + (vol_up ? 5 : -5), 0, 100);
+                            engine::set_hw_volume_pct(hw, pct);
+                            st.hw_volume_pct = pct;
+                            st.hw_volume_last_poll = {};
+                        }
+                    }
+                }
+            }
+        }
+
         if (ready && st.mini_mode != was_mini) {
             was_mini = st.mini_mode;
             if (st.mini_mode) {

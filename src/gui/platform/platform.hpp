@@ -92,6 +92,15 @@ public:
     // Resize the window; takes effect at the start of the next begin_frame().
     void resize(int w, int h);
 
+    // Read-and-clear XF86 media key flags. Each returns true once per key event.
+    bool take_media_play_pause() noexcept;
+    bool take_media_stop()       noexcept;
+    bool take_media_next()       noexcept;
+    bool take_media_prev()       noexcept;
+    bool take_media_mute()       noexcept;
+    bool take_media_vol_up()     noexcept;
+    bool take_media_vol_down()   noexcept;
+
 private:
     Window();
     std::unique_ptr<WindowImpl> impl_;

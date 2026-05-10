@@ -143,6 +143,14 @@ int Window::framebuffer_height() const noexcept { return impl_->height; }
 bool Window::close_requested()   const noexcept { return impl_->close_requested; }
 void Window::request_close()     noexcept       { impl_->close_requested = true; }
 
+bool Window::take_media_play_pause() noexcept { return impl_->media_play_pause.exchange(false); }
+bool Window::take_media_stop()       noexcept { return impl_->media_stop.exchange(false); }
+bool Window::take_media_next()       noexcept { return impl_->media_next.exchange(false); }
+bool Window::take_media_prev()       noexcept { return impl_->media_prev.exchange(false); }
+bool Window::take_media_mute()       noexcept { return impl_->media_mute.exchange(false); }
+bool Window::take_media_vol_up()     noexcept { return impl_->media_vol_up.exchange(false); }
+bool Window::take_media_vol_down()   noexcept { return impl_->media_vol_down.exchange(false); }
+
 void Window::resize(int w, int h) {
     impl_->width  = w;
     impl_->height = h;
