@@ -42,6 +42,37 @@ Log out and back in for the new group / limits to apply. transporter will
 detect the granted capability at startup and run RT; otherwise it falls back
 to `SCHED_OTHER` + `nice -10` and reports the actual mode in the Pipeline view.
 
+## Bit-perfect verification (snd-aloop loopback)
+
+To prove end-to-end bit-perfect output, transporter can play through ALSA's
+virtual loopback card and capture the result for byte-comparison against
+the source.
+
+    sudo modprobe snd-aloop                  # load the loopback driver
+    aplay -L | grep -i loopback              # confirm Loopback card appears
+
+The verification harness:
+
+    ./build/tests/integration/test_bit_perfect_loopback \
+        Loopback fixtures/sine_44100_16.wav
+    ./build/tests/integration/test_bit_perfect_loopback \
+        Loopback fixtures/sine_96000_24.wav
+    ./build/tests/integration/test_bit_perfect_loopback \
+        Loopback fixtures/sine_192000_24.wav
+
+Each invocation must exit 0. A non-zero exit means the digital path mutated
+the bytes between source and capture — that is a bug, file an issue.
+
+Stress test (5 minutes; assume PipeWire has been paused on the target DAC):
+
+    # terminal 1: drive playback
+    ./build/tests/integration/test_xrun_stress hw:CARD=DAC,DEV=0 300
+    # terminal 2: load the system
+    stress-ng --cpu $(($(nproc) - 1)) --vm 2 --vm-bytes 256M --io 2 --timeout 5m
+
+A tuned RT setup should report `xrun_total <= 1`; without RT, expect
+multiple xruns.
+
 ## License
 
 GPL-3.0-or-later. See `LICENSE`.

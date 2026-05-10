@@ -15,7 +15,7 @@ All design questions are now resolved. The list below is preserved for posterity
 
 These can be decided when the relevant code is written.
 
-- **Test framework.** Catch2, doctest, or GoogleTest. Default lean: doctest.
+- **Test framework.** ~~Catch2, doctest, or GoogleTest.~~ **Resolved: doctest** (vendored single-header at `third_party/doctest/`, declared as `doctest_dep` in Meson). New unit tests use `TEST_CASE`/`CHECK`. Existing per-binary `main()` tests stay as-is — migration is opt-in, not bulk.
 - **DBus library.** sdbus-c++, libsystemd, or basu. Default lean: sdbus-c++.
 - **Trace ring buffer.** Lock-free SPSC implementation choice (roll our own, vendored Vyukov-style, etc.).
 - **Hyprland config parser.** Regex-based, hand-rolled, or a small INI/TOML library.

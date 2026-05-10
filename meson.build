@@ -50,6 +50,7 @@ endif
 inc_public = include_directories('include')
 
 subdir('third_party/alac')
+subdir('third_party/doctest')
 subdir('third_party/imgui')
 subdir('third_party/tomlpp')
 subdir('src/engine')

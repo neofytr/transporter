@@ -179,3 +179,15 @@ test_dbus_metadata = executable(
   dependencies : [dbus_dep, engine_dep],
 )
 test('dbus_metadata', test_dbus_metadata)
+
+# doctest is the project's locked unit-test framework (single-header, vendored
+# under third_party/doctest). The pre-doctest tests above use plain main()
+# returning 0/non-zero and are not migrated. New unit tests should prefer
+# doctest.
+test_loopback_byte_compare = executable(
+  'test_loopback_byte_compare',
+  'loopback_byte_compare.cpp',
+  include_directories : include_directories('..'),
+  dependencies : [doctest_dep],
+)
+test('loopback_byte_compare', test_loopback_byte_compare)

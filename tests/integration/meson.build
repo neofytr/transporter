@@ -41,3 +41,21 @@ test_dbus_smoke = executable(
   'dbus_smoke.cpp',
   dependencies : [dbus_dep],
 )
+
+# Bit-perfect verification harness. Runs the production Engine against an
+# `snd-aloop` virtual loopback card and byte-compares the captured payload to
+# the source WAV. Owner-side acceptance test: not a `meson test` because it
+# needs `sudo modprobe snd-aloop` on the target box.
+test_bit_perfect_loopback = executable(
+  'test_bit_perfect_loopback',
+  ['bit_perfect_loopback.cpp', '../support/loopback_capture.cpp'],
+  dependencies : [engine_dep],
+)
+
+# xrun stress harness. Drives long playback against a real DAC; meant to be
+# run alongside stress-ng. Owner-side; not a `meson test`.
+test_xrun_stress = executable(
+  'test_xrun_stress',
+  'xrun_stress.cpp',
+  dependencies : [engine_dep],
+)
