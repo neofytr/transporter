@@ -31,6 +31,8 @@ engine_sources = files(
   'format/match.cpp',
 )
 
+engine_internal_inc = include_directories('.')
+
 engine_lib = static_library(
   'transporter_engine',
   engine_sources,

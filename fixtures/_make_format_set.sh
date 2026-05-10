@@ -55,4 +55,17 @@ ffmpeg -y -loglevel error -i "$SRC" "${META[@]}" \
 ffmpeg -y -loglevel error -i "$SRC" -ar 48000 "${META[@]}" \
     -c:a libopus -b:a 96k "$HERE/sine_44100_16.opus"
 
-echo "wrote: aiff flac m4a mp3 ogg opus" >&2
+# Phase 3 rate-switch fixture: same content resampled to 48 kHz, encoded as
+# FLAC. Used pairwise with sine_44100_16.flac to exercise auto rate-switch
+# between tracks.
+META48=(
+    -metadata "artist=transporter test"
+    -metadata "album=phase3 fixtures"
+    -metadata "title=sine 440Hz 48k"
+    -metadata "track=1"
+    -metadata "date=2024"
+)
+ffmpeg -y -loglevel error -i "$SRC" -ar 48000 "${META48[@]}" \
+    -c:a flac "$HERE/sine_48000_16.flac"
+
+echo "wrote: aiff flac m4a mp3 ogg opus flac@48k" >&2

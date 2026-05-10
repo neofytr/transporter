@@ -9,3 +9,9 @@ test_play_each_format = executable(
   'play_each_format.cpp',
   dependencies : [engine_dep],
 )
+
+test_engine_play = executable(
+  'test_engine_play',
+  'engine_play.cpp',
+  dependencies : [engine_dep],
+)

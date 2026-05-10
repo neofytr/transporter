@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#ifndef TRANSPORTER_ENGINE_ENGINE_HPP
+#define TRANSPORTER_ENGINE_ENGINE_HPP
+
+#include <transporter/engine/decoder.hpp>
+#include <transporter/engine/error.hpp>
+#include <transporter/engine/format.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+
+namespace transporter::engine {
+
+// Lifecycle states. The engine never re-enters Loading from Idle without an
+// explicit load() call. Stopped is a transient sink that returns to Idle once
+// teardown completes; consumers may observe it via StateChanged.
+enum class State : std::uint8_t {
+    Idle,
+    Loading,
+    Playing,
+    Paused,
+    Stopped,
+    Error,
+};
+
+// Construction-time configuration. ring_capacity_bytes is rounded up to the
+// next power of two (SpscByteRing requirement). target_latency is advisory
+// for Phase 3; period sizing in alsa::Output already targets ~12 ms periods.
+struct EngineConfig {
+    std::string device_id;
+    std::size_t ring_capacity_bytes = 1u << 20;
+    std::chrono::milliseconds target_latency{50};
+};
+
+// Asynchronous notification from the engine. Delivered on the engine's worker
+// thread (never the audio thread, never the API thread). The callback must
+// return promptly: a long-running callback blocks subsequent events.
+struct Event {
+    enum class Kind : std::uint8_t {
+        StateChanged,
+        TrackLoaded,
+        TrackEnded,
+        RateSwitched,
+        ErrorOccurred,
+    };
+    Kind kind{Kind::StateChanged};
+    State state{State::Idle};       // StateChanged
+    PcmFormat format{};             // TrackLoaded, RateSwitched
+    Tags tags{};                    // TrackLoaded
+    std::uint64_t total_frames{0};  // TrackLoaded
+    Error error{ErrorCode::DeviceOpenFailed, ""};  // ErrorOccurred
+};
+
+using EventCallback = std::function<void(const Event&)>;
+
+// Engine. Owns the active decoder, ALSA device, and the decoder + audio
+// threads. Public API methods are non-blocking command posts that return
+// std::expected for synchronous validation only; the actual state transition
+// completes asynchronously and surfaces via Event.
+//
+// Threading: load/play/pause/stop may be called from any thread. set_event_-
+// callback must be called before subscribing.
+//
+// Lifetime: the destructor stops the audio thread, closes the device, and
+// joins the decoder thread before returning. It is safe to destroy the
+// engine from any state.
+class Engine {
+public:
+    static std::expected<std::unique_ptr<Engine>, Error> create(EngineConfig cfg);
+
+    Engine(const Engine&) = delete;
+    Engine& operator=(const Engine&) = delete;
+    Engine(Engine&&) = delete;
+    Engine& operator=(Engine&&) = delete;
+    ~Engine();
+
+    // Validate-and-post. Returns synchronously after enqueueing the command.
+    // Decoder open and capability match happen on the engine worker thread;
+    // failures there surface via ErrorOccurred. Synchronous failure returns
+    // here only for argument-level problems (missing file, decoder factory
+    // refused).
+    std::expected<void, Error> load(std::filesystem::path file);
+    std::expected<void, Error> play();
+    std::expected<void, Error> pause();
+    std::expected<void, Error> stop();
+
+    State state() const noexcept;
+    PcmFormat current_format() const noexcept;
+
+    // Single-listener. Caller-side fan-out is the consumer's job.
+    void set_event_callback(EventCallback cb);
+
+private:
+    Engine();
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+
+    // Test-only seam (src/engine/engine_test_access.hpp). Friended to allow
+    // the unit tests to inject a mock device without IDevice on the public
+    // API.
+    friend struct EngineTestHooks;
+};
+
+struct EngineTestHooks; // declared above; defined in engine_test_access.hpp
+
+} // namespace transporter::engine
+
+#endif

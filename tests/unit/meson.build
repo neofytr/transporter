@@ -41,3 +41,41 @@ foreach t : decoder_format_tests
     args : [meson.project_source_root() / 'fixtures' / t[1]],
   )
 endforeach
+
+# Engine FSM tests use the engine-internal test seam (output_iface.hpp,
+# engine_test_access.hpp). Add the engine source dir to includes.
+test_engine_fsm = executable(
+  'test_engine_fsm',
+  'engine_fsm.cpp',
+  include_directories : engine_internal_inc,
+  dependencies : [engine_dep],
+)
+test('engine_fsm',
+  test_engine_fsm,
+  args : [meson.project_source_root() / 'fixtures' / 'sine_44100_16.flac'],
+)
+
+test_engine_rate_switch = executable(
+  'test_engine_rate_switch',
+  'engine_rate_switch.cpp',
+  include_directories : engine_internal_inc,
+  dependencies : [engine_dep],
+)
+test('engine_rate_switch',
+  test_engine_rate_switch,
+  args : [
+    meson.project_source_root() / 'fixtures' / 'sine_44100_16.flac',
+    meson.project_source_root() / 'fixtures' / 'sine_48000_16.flac',
+  ],
+)
+
+test_engine_format_refused = executable(
+  'test_engine_format_refused',
+  'engine_format_refused.cpp',
+  include_directories : engine_internal_inc,
+  dependencies : [engine_dep],
+)
+test('engine_format_refused',
+  test_engine_format_refused,
+  args : [meson.project_source_root() / 'fixtures' / 'sine_44100_24.wav'],
+)
