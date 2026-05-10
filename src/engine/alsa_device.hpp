@@ -26,12 +26,21 @@ public:
 
     const PcmFormat& format() const noexcept override { return out_.format(); }
 
-    std::expected<void, Error>
+    std::expected<std::size_t, Error>
     write_all(std::span<const std::byte> interleaved) override {
         return out_.write_all(interleaved);
     }
 
     void drop_and_close() noexcept override { out_.drain_and_close(); }
+
+    PeriodInfo period_info() const noexcept override {
+        const auto p = out_.period_info();
+        PeriodInfo r{};
+        r.period_frames = p.period_frames;
+        r.periods = p.periods;
+        r.buffer_frames = p.buffer_frames;
+        return r;
+    }
 
 private:
     alsa::Output out_;
@@ -62,6 +71,21 @@ public:
         }
         return std::make_unique<AlsaOutputAdapter>(std::move(*o));
     }
+
+    std::expected<std::unique_ptr<IOutput>, Error>
+    open(const PcmFormat& fmt, const OpenOpts& opts) override {
+        alsa::OpenOptions ao{};
+        ao.target_period_ms = opts.target_period_ms;
+        ao.periods_target = opts.periods_target;
+        ao.xrun_observer = opts.xrun_cb;
+        auto o = alsa::Output::open(hw_name_, fmt, ao);
+        if (!o) {
+            return std::unexpected(o.error());
+        }
+        return std::make_unique<AlsaOutputAdapter>(std::move(*o));
+    }
+
+    const std::string& hw_name() const noexcept { return hw_name_; }
 
 private:
     std::string hw_name_;

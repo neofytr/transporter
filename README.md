@@ -22,6 +22,26 @@ meson compile -C build
 ./build/transporter --version
 ```
 
+## Realtime audio (recommended)
+
+For lowest-jitter playback the audio thread runs `SCHED_FIFO` priority 80 with
+`mlockall` and CPU affinity. By default the kernel does not grant unprivileged
+processes RT scheduling. The standard fix on Debian / Ubuntu / Arch is to add
+the user to the `audio` group and bump RT / memlock limits:
+
+    sudo gpasswd -a "$USER" audio
+    sudo install -m 0644 packaging/limits-transporter.conf \
+         /etc/security/limits.d/99-transporter.conf
+
+The supplied `packaging/limits-transporter.conf`:
+
+    @audio  -  rtprio  95
+    @audio  -  memlock unlimited
+
+Log out and back in for the new group / limits to apply. transporter will
+detect the granted capability at startup and run RT; otherwise it falls back
+to `SCHED_OTHER` + `nice -10` and reports the actual mode in the Pipeline view.
+
 ## License
 
 GPL-3.0-or-later. See `LICENSE`.

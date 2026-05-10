@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -33,6 +34,16 @@ struct DeviceCapsStorage {
 
 std::expected<DeviceCapsStorage, Error> probe(const std::string& hw_name);
 
+// Open-time options. target_period_ms scales period frame count per active
+// rate (12 ms default at 44.1 k => 528 frames; 192 k => 2304 frames). An
+// xrun_observer is invoked from write_all on each recover; it must not
+// allocate, lock, or block — the audio thread is calling it.
+struct OpenOptions {
+    unsigned target_period_ms = 12;
+    unsigned periods_target = 4;
+    std::function<void(int errno_neg)> xrun_observer;
+};
+
 // Opaque handle: holds the snd_pcm_t plus its negotiated parameters.
 class Output {
 public:
@@ -49,13 +60,18 @@ public:
     ~Output();
 
     static std::expected<Output, Error> open(const std::string& hw_name, const PcmFormat& fmt);
+    static std::expected<Output, Error>
+    open(const std::string& hw_name, const PcmFormat& fmt, const OpenOptions& opts);
 
     PeriodInfo period_info() const noexcept;
     const PcmFormat& format() const noexcept;
 
     // writei loop with -EPIPE / -ESTRPIPE recovery via snd_pcm_recover.
-    // Synchronous for Phase 1; consumes all input frames or errors.
-    std::expected<void, Error> write_all(std::span<const std::byte> interleaved_frames);
+    // Synchronous for Phase 1; consumes all input frames or errors. Returns
+    // the number of frames written on success; on error, the count is whatever
+    // got through before the failure.
+    std::expected<std::size_t, Error>
+    write_all(std::span<const std::byte> interleaved_frames);
 
     // Drain remaining frames, then close. Idempotent.
     void drain_and_close() noexcept;

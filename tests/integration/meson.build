@@ -21,3 +21,9 @@ test_device_list = executable(
   'device_list.cpp',
   dependencies : [engine_dep],
 )
+
+test_telemetry_dump = executable(
+  'test_telemetry_dump',
+  'telemetry_dump.cpp',
+  dependencies : [engine_dep],
+)

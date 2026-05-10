@@ -34,8 +34,11 @@ class MockOutput final : public td::IOutput {
 public:
     explicit MockOutput(tp::PcmFormat fmt) : fmt_(fmt) {}
     const tp::PcmFormat& format() const noexcept override { return fmt_; }
-    std::expected<void, tp::Error>
-    write_all(std::span<const std::byte> /*in*/) override { return {}; }
+    std::expected<std::size_t, tp::Error>
+    write_all(std::span<const std::byte> in) override {
+        const unsigned fb = fmt_.frame_bytes();
+        return fb == 0 ? std::size_t{0} : in.size() / fb;
+    }
     void drop_and_close() noexcept override {}
 
 private:
@@ -55,6 +58,7 @@ public:
         v.max_channels = 2;
         return v;
     }
+    using td::IDevice::open;
     std::expected<std::unique_ptr<td::IOutput>, tp::Error>
     open(const tp::PcmFormat& fmt) override {
         opens.fetch_add(1, std::memory_order_release);

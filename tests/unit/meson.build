@@ -86,3 +86,28 @@ test_device_stable_id = executable(
   dependencies : [engine_dep],
 )
 test('device_stable_id', test_device_stable_id)
+
+test_rt_apply = executable(
+  'test_rt_apply',
+  'rt_apply.cpp',
+  dependencies : [engine_dep],
+)
+test('rt_apply', test_rt_apply)
+
+test_trace_ring = executable(
+  'test_trace_ring',
+  'trace_ring.cpp',
+  dependencies : [engine_dep],
+)
+test('trace_ring', test_trace_ring)
+
+test_pipeline_snapshot = executable(
+  'test_pipeline_snapshot',
+  'pipeline_snapshot.cpp',
+  include_directories : engine_internal_inc,
+  dependencies : [engine_dep],
+)
+test('pipeline_snapshot',
+  test_pipeline_snapshot,
+  args : [meson.project_source_root() / 'fixtures' / 'sine_44100_16.flac'],
+)

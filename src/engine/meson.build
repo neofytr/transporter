@@ -33,6 +33,8 @@ engine_sources = files(
   'device/list.cpp',
   'device/probe.cpp',
   'format/match.cpp',
+  'rt/apply.cpp',
+  'trace/ring.cpp',
 )
 
 engine_internal_inc = include_directories('.')

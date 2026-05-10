@@ -129,6 +129,7 @@ struct Output::Impl {
     PcmHandle pcm;
     PcmFormat fmt{};
     PeriodInfo periods{};
+    std::function<void(int)> xrun_observer;
 };
 
 Output::Output(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -161,6 +162,11 @@ std::expected<DeviceCapsStorage, Error> probe(const std::string& hw_name) {
 }
 
 std::expected<Output, Error> Output::open(const std::string& hw_name, const PcmFormat& fmt) {
+    return Output::open(hw_name, fmt, OpenOptions{});
+}
+
+std::expected<Output, Error>
+Output::open(const std::string& hw_name, const PcmFormat& fmt, const OpenOptions& opts) {
     const snd_pcm_format_t af = detail::to_alsa_format(fmt.sample_format);
     if (af == SND_PCM_FORMAT_UNKNOWN) {
         return std::unexpected(Error{ErrorCode::DeviceParamsRejected,
@@ -203,12 +209,13 @@ std::expected<Output, Error> Output::open(const std::string& hw_name, const PcmF
         return alsa_err(ErrorCode::DeviceParamsRejected, "set_rate(exact)", rc);
     }
 
-    // Period sizing: target ~12 ms at the active rate; pick the largest
-    // accepted value <= target via per-frame-count test, then set exact.
-    // Falls back to the device's minimum if even that is rejected at our
-    // target. No `_near` calls.
+    // Period sizing: target ~target_period_ms at the active rate; pick the
+    // largest accepted value <= target via per-frame-count test, then set
+    // exact. Falls back to the device's minimum if even that is rejected at
+    // our target. No `_near` calls.
+    const unsigned period_ms = opts.target_period_ms == 0 ? 1u : opts.target_period_ms;
     const std::uint64_t target_period_frames =
-        (static_cast<std::uint64_t>(fmt.sample_rate_hz) * 12u) / 1000u;
+        (static_cast<std::uint64_t>(fmt.sample_rate_hz) * period_ms) / 1000u;
 
     snd_pcm_uframes_t period_min = 0;
     snd_pcm_uframes_t period_max = 0;
@@ -256,7 +263,7 @@ std::expected<Output, Error> Output::open(const std::string& hw_name, const PcmF
     if (rc < 0) {
         return alsa_err(ErrorCode::DeviceParamsRejected, "get_periods_max", rc);
     }
-    unsigned int periods = 4;
+    unsigned int periods = opts.periods_target == 0 ? 4u : opts.periods_target;
     if (periods < periods_min) {
         periods = periods_min;
     }
@@ -308,10 +315,11 @@ std::expected<Output, Error> Output::open(const std::string& hw_name, const PcmF
     impl->periods.period_frames = static_cast<std::uint32_t>(actual_period);
     impl->periods.periods = actual_periods;
     impl->periods.buffer_frames = static_cast<std::uint32_t>(buffer_frames);
+    impl->xrun_observer = opts.xrun_observer;
     return Output{std::move(impl)};
 }
 
-std::expected<void, Error>
+std::expected<std::size_t, Error>
 Output::write_all(std::span<const std::byte> interleaved_frames) {
     if (!impl_ || !impl_->pcm) {
         return std::unexpected(Error{ErrorCode::WriteFailed, "device not open"});
@@ -324,6 +332,7 @@ Output::write_all(std::span<const std::byte> interleaved_frames) {
     snd_pcm_t* pcm = impl_->pcm.get();
     const std::byte* p = interleaved_frames.data();
     std::size_t bytes_remaining = interleaved_frames.size();
+    std::size_t frames_written_total = 0;
 
     while (bytes_remaining > 0) {
         const snd_pcm_uframes_t frames =
@@ -332,6 +341,9 @@ Output::write_all(std::span<const std::byte> interleaved_frames) {
         if (written < 0) {
             const int err = static_cast<int>(written);
             if (err == -EPIPE || err == -ESTRPIPE) {
+                if (impl_->xrun_observer) {
+                    impl_->xrun_observer(err);
+                }
                 const int rec = snd_pcm_recover(pcm, err, 1);
                 if (rec < 0) {
                     return alsa_err(ErrorCode::WriteFailed, "snd_pcm_recover", rec);
@@ -340,12 +352,13 @@ Output::write_all(std::span<const std::byte> interleaved_frames) {
             }
             return alsa_err(ErrorCode::WriteFailed, "snd_pcm_writei", err);
         }
+        frames_written_total += static_cast<std::size_t>(written);
         const std::size_t advance =
             static_cast<std::size_t>(written) * static_cast<std::size_t>(frame_bytes);
         p += advance;
         bytes_remaining -= advance;
     }
-    return {};
+    return frames_written_total;
 }
 
 void Output::drain_and_close() noexcept {

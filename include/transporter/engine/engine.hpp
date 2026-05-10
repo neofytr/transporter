@@ -6,6 +6,7 @@
 #include <transporter/engine/decoder.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/engine/format.hpp>
+#include <transporter/engine/telemetry.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <ostream>
 #include <string>
 
 namespace transporter::engine {
@@ -93,6 +95,16 @@ public:
 
     State state() const noexcept;
     PcmFormat current_format() const noexcept;
+
+    // Snapshot the full pipeline for the GUI / telemetry dump. Safe to call
+    // from any non-RT thread at >= 10 Hz. Holds engine-side mutexes only
+    // briefly (decoder pointer + current hw string); the audio path is
+    // unaffected. Returns by value; never throws on the happy path.
+    PipelineSnapshot pipeline_snapshot() const;
+
+    // Dump the in-memory trace ring as one event per line. Format is stable
+    // enough for grep / awk; not a binary protocol.
+    void dump_trace(std::ostream& os) const;
 
     // Single-listener. Caller-side fan-out is the consumer's job.
     void set_event_callback(EventCallback cb);

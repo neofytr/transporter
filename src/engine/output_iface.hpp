@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <span>
 #include <vector>
@@ -34,14 +35,35 @@ struct CapsView {
 // IOutput models the engine's view of an opened device. The engine owns the
 // IOutput; on rate transitions the engine destroys it and constructs a new
 // one. write_all is the audio-thread hot path; it must not allocate.
+//
+// write_all returns the number of frames successfully written (may be
+// fewer than requested only on the rare partial-on-error path; on success
+// it is the requested frame count).
 class IOutput {
 public:
     virtual ~IOutput() = default;
 
     virtual const PcmFormat& format() const noexcept = 0;
-    virtual std::expected<void, Error>
+    virtual std::expected<std::size_t, Error>
     write_all(std::span<const std::byte> interleaved) = 0;
     virtual void drop_and_close() noexcept = 0;
+
+    // Period / buffer info; used by telemetry. Default implementation
+    // returns zeroes (acceptable for mocks).
+    struct PeriodInfo {
+        std::uint32_t period_frames = 0;
+        std::uint32_t periods = 0;
+        std::uint32_t buffer_frames = 0;
+    };
+    virtual PeriodInfo period_info() const noexcept { return {}; }
+};
+
+// Open options as the engine passes them across the IDevice seam. xrun_cb
+// fires on each ALSA recover; must not allocate / lock / block.
+struct OpenOpts {
+    unsigned target_period_ms = 12;
+    unsigned periods_target = 4;
+    std::function<void(int)> xrun_cb;
 };
 
 // IDevice abstracts probe + open. Real impl wraps alsa::probe and
@@ -54,6 +76,13 @@ public:
     virtual std::expected<CapsView, Error> probe_caps() = 0;
     virtual std::expected<std::unique_ptr<IOutput>, Error>
     open(const PcmFormat& fmt) = 0;
+    virtual std::expected<std::unique_ptr<IOutput>, Error>
+    open(const PcmFormat& fmt, const OpenOpts& opts) {
+        // Default delegates to plain open(); subclasses override to honour
+        // period_ms / xrun_cb.
+        (void)opts;
+        return open(fmt);
+    }
 };
 
 } // namespace transporter::engine::detail
