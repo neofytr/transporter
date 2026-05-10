@@ -89,6 +89,9 @@ public:
     // Force-close the window (used when the engine reports a fatal error).
     void request_close() noexcept;
 
+    // Resize the window; takes effect at the start of the next begin_frame().
+    void resize(int w, int h);
+
 private:
     Window();
     std::unique_ptr<WindowImpl> impl_;

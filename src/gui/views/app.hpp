@@ -59,6 +59,7 @@ struct AppState {
     RepeatMode repeat_mode = RepeatMode::None;
 
     ViewId current_view = ViewId::Main;
+    bool mini_mode = false;
 
     // Library UI state
     std::string library_query;
@@ -106,6 +107,7 @@ void draw_main_view(AppState& st);
 void draw_library_view(AppState& st);
 void draw_pipeline_view(AppState& st);
 void draw_queue_view(AppState& st);
+void draw_mini_view(AppState& st);
 
 // Test seam: render the pipeline view directly from a snapshot, decoupled
 // from Engine. Same content, no engine pointer dereferenced.

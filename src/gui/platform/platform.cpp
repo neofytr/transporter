@@ -143,4 +143,10 @@ int Window::framebuffer_height() const noexcept { return impl_->height; }
 bool Window::close_requested()   const noexcept { return impl_->close_requested; }
 void Window::request_close()     noexcept       { impl_->close_requested = true; }
 
+void Window::resize(int w, int h) {
+    impl_->width  = w;
+    impl_->height = h;
+    impl_->needs_resize = true;
+}
+
 } // namespace transporter::gui::platform

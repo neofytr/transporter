@@ -19,20 +19,20 @@
 
 namespace transporter::gui {
 
-namespace {
-
-constexpr ImVec4 kPass{0.40f, 0.85f, 0.40f, 1.0f};
-constexpr ImVec4 kFail{0.95f, 0.40f, 0.35f, 1.0f};
-constexpr ImVec4 kWarn{0.95f, 0.75f, 0.30f, 1.0f};
-constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
-
-void format_time(std::int64_t ms, char* out, std::size_t n) {
+static void format_time(std::int64_t ms, char* out, std::size_t n) {
     if (ms < 0) ms = 0;
     const std::int64_t s = ms / 1000;
     std::snprintf(out, n, "%lld:%02lld",
                   static_cast<long long>(s / 60),
                   static_cast<long long>(s % 60));
 }
+
+namespace {
+
+constexpr ImVec4 kPass{0.40f, 0.85f, 0.40f, 1.0f};
+constexpr ImVec4 kFail{0.95f, 0.40f, 0.35f, 1.0f};
+constexpr ImVec4 kWarn{0.95f, 0.75f, 0.30f, 1.0f};
+constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
 
 void dac_combo(AppState& st) {
     ImGui::TextColored(kMuted, "DAC:");
@@ -145,6 +145,17 @@ void draw_main_view(AppState& st) {
     engine::PipelineSnapshot snap{};
     if (st.engine_) {
         snap = st.engine_->pipeline_snapshot();
+    }
+
+    // Mini mode toggle — top right of main view
+    {
+        const float btn_w = ImGui::CalcTextSize("mini").x + ImGui::GetStyle().FramePadding.x * 2;
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w);
+        if (ImGui::SmallButton(st.mini_mode ? "full" : "mini")) {
+            st.mini_mode = !st.mini_mode;
+        }
+        ImGui::SameLine(0, 0);
+        ImGui::NewLine();
     }
 
     // Toast: shown even without an engine.
@@ -349,6 +360,48 @@ void draw_main_view(AppState& st) {
     const auto entries = st.snapshot_log(6);
     for (const auto& e : entries) {
         ImGui::TextWrapped("%s", e.text.c_str());
+    }
+}
+
+void draw_mini_view(AppState& st) {
+    engine::PipelineSnapshot snap{};
+    if (st.engine_) snap = st.engine_->pipeline_snapshot();
+
+    if (ImGui::SmallButton("full")) { st.mini_mode = false; }
+    ImGui::SameLine();
+
+    const char* title = snap.source.tags.title.empty()
+        ? (snap.source.file_path.empty() ? "\xe2\x80\x94" : snap.source.file_path.c_str())
+        : snap.source.tags.title.c_str();
+    ImGui::TextColored(kMuted, "%s", title);
+    ImGui::SameLine();
+
+    const std::int64_t total_ms = snap.source.duration.count();
+    const std::int64_t fw = static_cast<std::int64_t>(snap.output.frames_written) -
+                            static_cast<std::int64_t>(snap.output.frames_written_at_track_start);
+    const std::int64_t elapsed_ms = snap.source.sample_rate_hz > 0
+        ? (fw * 1000LL) / snap.source.sample_rate_hz : 0;
+    char tbuf[16], dbuf[16];
+    format_time(elapsed_ms < 0 ? 0 : elapsed_ms, tbuf, sizeof(tbuf));
+    format_time(total_ms, dbuf, sizeof(dbuf));
+    ImGui::TextColored(kMuted, "%s/%s", tbuf, dbuf);
+    ImGui::SameLine();
+
+    const bool playing = (snap.engine_state == engine::State::Playing);
+    if (st.engine_) {
+        if (ImGui::SmallButton(playing ? "\xe2\x8f\xb8" : "\xe2\x8f\xb5")) {
+            playing ? (void)st.engine_->pause() : (void)st.engine_->play();
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("\xe2\x8f\xb9")) { (void)st.engine_->stop(); }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("\xe2\x8f\xae")) {
+            if (auto p = st.queue_previous(); p) { (void)st.engine_->load(*p); (void)st.engine_->play(); }
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("\xe2\x8f\xad")) {
+            if (auto n = st.queue_next(); n) { (void)st.engine_->load(*n); (void)st.engine_->play(); }
+        }
     }
 }
 

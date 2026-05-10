@@ -514,6 +514,7 @@ int run(const AppArgs& args) {
     });
 
     bool queued_done = false;
+    bool was_mini = false;
 
     while (win.poll()) {
         const bool ready = backend_ready.load(std::memory_order_acquire);
@@ -592,6 +593,15 @@ int run(const AppArgs& args) {
             queued_done = maybe_play_queued_file(st);
         }
 
+        if (ready && st.mini_mode != was_mini) {
+            was_mini = st.mini_mode;
+            if (st.mini_mode) {
+                win.resize(480, 72);
+            } else {
+                win.resize(960, 600);
+            }
+        }
+
         win.begin_frame();
 
         // Full-window dock
@@ -606,6 +616,8 @@ int run(const AppArgs& args) {
 
         if (!ready) {
             ImGui::TextDisabled("Initializing...");
+        } else if (st.mini_mode) {
+            draw_mini_view(st);
         } else {
             draw_tab_bar(st);
             handle_view_shortcuts(st);
