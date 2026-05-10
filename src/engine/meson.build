@@ -5,6 +5,7 @@ flac_dep = dependency('flac')
 mpg123_dep = dependency('libmpg123')
 vorbisfile_dep = dependency('vorbisfile')
 opusfile_dep = dependency('opusfile')
+udev_dep = dependency('libudev')
 
 # alac.cpp pulls Apple's ALACAudioTypes.h whose multi-char enum literals
 # trip -Wpedantic. The vendored sources are silenced inside their own
@@ -28,6 +29,9 @@ engine_sources = files(
   'decoder/opus.cpp',
   'decoder/vorbis.cpp',
   'decoder/wav.cpp',
+  'device/fingerprint.cpp',
+  'device/list.cpp',
+  'device/probe.cpp',
   'format/match.cpp',
 )
 
@@ -38,11 +42,11 @@ engine_lib = static_library(
   engine_sources,
   include_directories : inc_public,
   link_whole : [alac_glue_lib],
-  dependencies : [alsa_dep, flac_dep, mpg123_dep, vorbisfile_dep, opusfile_dep, alac_dep],
+  dependencies : [alsa_dep, flac_dep, mpg123_dep, vorbisfile_dep, opusfile_dep, alac_dep, udev_dep],
 )
 
 engine_dep = declare_dependency(
   link_with : engine_lib,
   include_directories : inc_public,
-  dependencies : [alsa_dep, flac_dep, mpg123_dep, vorbisfile_dep, opusfile_dep, alac_dep],
+  dependencies : [alsa_dep, flac_dep, mpg123_dep, vorbisfile_dep, opusfile_dep, alac_dep, udev_dep],
 )

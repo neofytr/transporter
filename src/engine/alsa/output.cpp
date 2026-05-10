@@ -2,9 +2,10 @@
 
 #include <transporter/engine/alsa_output.hpp>
 
+#include "probe_internal.hpp"
+
 #include <alsa/asoundlib.h>
 
-#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -27,7 +28,7 @@ struct PcmCloser {
 };
 using PcmHandle = std::unique_ptr<snd_pcm_t, PcmCloser>;
 
-// RAII for snd_pcm_hw_params_t (alloca-style allocator pair).
+// RAII for snd_pcm_hw_params_t.
 struct HwParamsFreer {
     void operator()(snd_pcm_hw_params_t* p) const noexcept {
         if (p) {
@@ -45,34 +46,6 @@ HwParams make_hw_params() {
     return HwParams{raw};
 }
 
-snd_pcm_format_t to_alsa_format(SampleFormat f) noexcept {
-    switch (f) {
-    case SampleFormat::S16_LE:
-        return SND_PCM_FORMAT_S16_LE;
-    case SampleFormat::S24_LE:
-        return SND_PCM_FORMAT_S24_LE;
-    case SampleFormat::S24_3LE:
-        return SND_PCM_FORMAT_S24_3LE;
-    case SampleFormat::S32_LE:
-        return SND_PCM_FORMAT_S32_LE;
-    case SampleFormat::FLOAT_LE:
-        return SND_PCM_FORMAT_FLOAT_LE;
-    }
-    return SND_PCM_FORMAT_UNKNOWN;
-}
-
-constexpr std::array<SampleFormat, 5> ALL_FORMATS = {
-    SampleFormat::S16_LE, SampleFormat::S24_LE, SampleFormat::S24_3LE,
-    SampleFormat::S32_LE, SampleFormat::FLOAT_LE,
-};
-
-// Rates we probe. Standard PCM rates the spec admits; the device picks which
-// it actually accepts. test_rate is per-rate and authoritative.
-constexpr std::array<std::uint32_t, 11> CANDIDATE_RATES = {
-    8000,  11025, 16000,  22050,  32000,  44100,
-    48000, 88200, 96000, 176400, 192000,
-};
-
 std::unexpected<Error> alsa_err(ErrorCode code, const std::string& what, int err) {
     std::string msg = what;
     msg += ": ";
@@ -89,6 +62,68 @@ ErrorCode classify_open_error(int err) noexcept {
 }
 
 } // namespace
+
+namespace detail {
+
+snd_pcm_format_t to_alsa_format(SampleFormat f) noexcept {
+    switch (f) {
+    case SampleFormat::S16_LE:
+        return SND_PCM_FORMAT_S16_LE;
+    case SampleFormat::S24_LE:
+        return SND_PCM_FORMAT_S24_LE;
+    case SampleFormat::S24_3LE:
+        return SND_PCM_FORMAT_S24_3LE;
+    case SampleFormat::S32_LE:
+        return SND_PCM_FORMAT_S32_LE;
+    case SampleFormat::FLOAT_LE:
+        return SND_PCM_FORMAT_FLOAT_LE;
+    }
+    return SND_PCM_FORMAT_UNKNOWN;
+}
+
+std::expected<void, Error> probe_open_pcm(snd_pcm_t* pcm, DeviceCapsStorage& caps) {
+    HwParams hwp = make_hw_params();
+    if (!hwp) {
+        return std::unexpected(Error{ErrorCode::DeviceParamsRejected,
+                                     "snd_pcm_hw_params_malloc failed"});
+    }
+    const int any_err = snd_pcm_hw_params_any(pcm, hwp.get());
+    if (any_err < 0) {
+        return alsa_err(ErrorCode::DeviceParamsRejected, "snd_pcm_hw_params_any", any_err);
+    }
+
+    caps.formats.clear();
+    caps.rates.clear();
+    for (const SampleFormat f : ALL_FORMATS) {
+        const snd_pcm_format_t af = to_alsa_format(f);
+        if (snd_pcm_hw_params_test_format(pcm, hwp.get(), af) == 0) {
+            caps.formats.push_back(f);
+        }
+    }
+    for (const std::uint32_t r : ANCHOR_RATES) {
+        if (snd_pcm_hw_params_test_rate(pcm, hwp.get(), r, 0) == 0) {
+            caps.rates.push_back(r);
+        }
+    }
+
+    unsigned int min_ch = 0;
+    unsigned int max_ch = 0;
+    int rc = snd_pcm_hw_params_get_channels_min(hwp.get(), &min_ch);
+    if (rc < 0) {
+        return alsa_err(ErrorCode::DeviceParamsRejected,
+                        "snd_pcm_hw_params_get_channels_min", rc);
+    }
+    rc = snd_pcm_hw_params_get_channels_max(hwp.get(), &max_ch);
+    if (rc < 0) {
+        return alsa_err(ErrorCode::DeviceParamsRejected,
+                        "snd_pcm_hw_params_get_channels_max", rc);
+    }
+    caps.min_channels = static_cast<std::uint16_t>(min_ch);
+    caps.max_channels = static_cast<std::uint16_t>(max_ch);
+    return {};
+}
+
+} // namespace detail
 
 struct Output::Impl {
     PcmHandle pcm;
@@ -117,51 +152,16 @@ std::expected<DeviceCapsStorage, Error> probe(const std::string& hw_name) {
     }
     PcmHandle pcm{raw};
 
-    HwParams hwp = make_hw_params();
-    if (!hwp) {
-        return std::unexpected(Error{ErrorCode::DeviceParamsRejected,
-                                     "snd_pcm_hw_params_malloc failed"});
-    }
-    const int any_err = snd_pcm_hw_params_any(pcm.get(), hwp.get());
-    if (any_err < 0) {
-        return alsa_err(ErrorCode::DeviceParamsRejected, "snd_pcm_hw_params_any", any_err);
-    }
-
     DeviceCapsStorage caps{};
-
-    for (const SampleFormat f : ALL_FORMATS) {
-        const snd_pcm_format_t af = to_alsa_format(f);
-        if (snd_pcm_hw_params_test_format(pcm.get(), hwp.get(), af) == 0) {
-            caps.formats.push_back(f);
-        }
+    auto rc = detail::probe_open_pcm(pcm.get(), caps);
+    if (!rc) {
+        return std::unexpected(rc.error());
     }
-
-    for (const std::uint32_t r : CANDIDATE_RATES) {
-        if (snd_pcm_hw_params_test_rate(pcm.get(), hwp.get(), r, 0) == 0) {
-            caps.rates.push_back(r);
-        }
-    }
-
-    unsigned int min_ch = 0;
-    unsigned int max_ch = 0;
-    int rc = snd_pcm_hw_params_get_channels_min(hwp.get(), &min_ch);
-    if (rc < 0) {
-        return alsa_err(ErrorCode::DeviceParamsRejected,
-                        "snd_pcm_hw_params_get_channels_min", rc);
-    }
-    rc = snd_pcm_hw_params_get_channels_max(hwp.get(), &max_ch);
-    if (rc < 0) {
-        return alsa_err(ErrorCode::DeviceParamsRejected,
-                        "snd_pcm_hw_params_get_channels_max", rc);
-    }
-    caps.min_channels = static_cast<std::uint16_t>(min_ch);
-    caps.max_channels = static_cast<std::uint16_t>(max_ch);
-
     return caps;
 }
 
 std::expected<Output, Error> Output::open(const std::string& hw_name, const PcmFormat& fmt) {
-    const snd_pcm_format_t af = to_alsa_format(fmt.sample_format);
+    const snd_pcm_format_t af = detail::to_alsa_format(fmt.sample_format);
     if (af == SND_PCM_FORMAT_UNKNOWN) {
         return std::unexpected(Error{ErrorCode::DeviceParamsRejected,
                                      "internal: unknown sample format"});

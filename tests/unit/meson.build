@@ -79,3 +79,10 @@ test('engine_format_refused',
   test_engine_format_refused,
   args : [meson.project_source_root() / 'fixtures' / 'sine_44100_24.wav'],
 )
+
+test_device_stable_id = executable(
+  'test_device_stable_id',
+  'device_stable_id.cpp',
+  dependencies : [engine_dep],
+)
+test('device_stable_id', test_device_stable_id)

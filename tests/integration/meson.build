@@ -15,3 +15,9 @@ test_engine_play = executable(
   'engine_play.cpp',
   dependencies : [engine_dep],
 )
+
+test_device_list = executable(
+  'test_device_list',
+  'device_list.cpp',
+  dependencies : [engine_dep],
+)
