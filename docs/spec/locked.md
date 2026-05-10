@@ -138,6 +138,23 @@ Each row gives the **decision**, **rationale**, and **implications**. If you nee
 - **Rationale:** Anti-knob; fewer ways to break bit-perfect or get into a confusing state.
 - **Implications:** Schema in `~/.config/transporter/config.toml` covers `[device]` (preferred), `[audio]` (period_ms, period_count, RT policy override), `[library]` (directories, ignore patterns), `[theme]` (override file path, follow_hyprland flag). No knobs for things users shouldn't change.
 
+### Pipeline transparency view
+- **Decision:** The GUI ships a dense, comprehensive Pipeline view that exposes the full audio path end-to-end. Toggleable from the main view; not the default landing surface. Content includes:
+  - **Source.** File path, codec, container, bitrate (lossy formats), bit depth, channels, native sample rate, total frames, duration, decoder library + version.
+  - **Decoder stage.** Output `PcmFormat`, frames produced this session, decoder thread state.
+  - **Format-match stage.** File-declared format, intersected device-supported set, matched format. On miss, the specific rejection reason (rate / bit depth / channels / sample format).
+  - **Ring buffer.** Capacity (bytes, frames at current rate, milliseconds), current fill, session max-watermark.
+  - **Output stage.** ALSA `period_size`, period count, `buffer_size`, exact-set `hw_params` (format, rate, channels), frames written this session, xrun count this session.
+  - **Device.** ALSA card name, USB vendor:product:serial when available, full supported-format matrix (formats × rates), hardware-volume control presence + range.
+  - **Realtime.** Scheduling policy (`SCHED_FIFO` / `SCHED_OTHER`), priority, mlocked, CPU affinity, trace ring drop count.
+  - **Bit-perfect verdict.** YES / QUALIFIED / NO with per-condition breakdown (digital path bit-perfect, no resampling, RT enabled, no recent xrun, volume mode unity, no mismatch in flight).
+- **Rationale:** Audiophile users distrust black boxes. Showing every stage's state with audit-grade specificity demonstrates the bit-perfect commitment, not just claims it. A minimal main view plus a dense Pipeline view gives both the at-a-glance and the "I want to see everything" use cases without compromising either.
+- **Implications:**
+  - Engine grows a `PipelineSnapshot` telemetry struct + `Engine::pipeline_snapshot()` accessor. Snapshots are produced on the engine worker (or any non-RT thread) by reading atomic counters and queryable formats.
+  - Audio thread updates atomics only (frames written, xrun count, ring tail). No locking on the hot path.
+  - Pipeline view is the **explicit exception** to the "Minimal scope" UI principle. The minimalism reviewer does not gate this view's density.
+  - Live counters refresh at ≥ 10 Hz from the GUI's animation loop. Expensive snapshots (DAC capability matrix) are taken once on device-open and cached for the session.
+
 ## Implementation
 
 ### Language

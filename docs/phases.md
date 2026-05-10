@@ -93,12 +93,15 @@ Each phase produces something runnable and testable. A phase is "done" when its 
 - `engine/rt/`: thread setup, capability detection (try `pthread_setschedparam`, fall back), `mlockall`, affinity helpers
 - Lock-free trace ring buffer (`engine/trace/`)
 - Period-count scaling logic per active rate (keep ~constant wall-clock latency)
+- `engine/telemetry/`: `PipelineSnapshot` producer + atomic counters wired through decoder + audio threads (frames decoded, frames written, ring fill bytes, session max-watermark, xrun count, RT mode, current ALSA `hw_params`)
+- `include/transporter/engine/telemetry.hpp`: `PipelineSnapshot` struct (per-stage sub-structs Source / Decoder / FormatMatch / Ring / Output / Device / Realtime / BitPerfect) + `Engine::pipeline_snapshot()` callable from any non-RT thread
 - README section documenting `/etc/security/limits.d/99-transporter.conf`
 
 **Acceptance.**
 - Stress test (`stress-ng --cpu N --timeout 30s`) during playback produces ≤ 1 xrun on a tuned RT setup
 - Fallback path warns clearly in UI; xrun count visible in telemetry dump
 - Trace events from audio thread visible in a separate "telemetry dump" command
+- `Engine::pipeline_snapshot()` returns a populated snapshot during playback: live frame counters increase monotonically, ring fill is non-zero, RT mode reports `FIFO` or `OTHER` per environment, all per-stage formats match the loaded track
 
 ---
 
@@ -144,6 +147,8 @@ Each phase produces something runnable and testable. A phase is "done" when its 
 - `gui/platform/`: Wayland surface + xdg-shell + EGL + GL initialization for ImGui
 - `gui/views/main.cpp`: minimal main view (track info, time, transport buttons, DAC selector)
 - `gui/views/library.cpp`: scrollable list pulling from `library/` API
+- `gui/views/pipeline.cpp`: dense pipeline transparency view per `docs/spec/locked.md` — vertical stack of stage cards (Source / Decoder / Format match / Ring / Output / Device / Realtime / Bit-perfect verdict); polls `Engine::pipeline_snapshot()` each frame; live counters update at GUI rate
+- Toggle (button + keyboard shortcut) to swap main ↔ pipeline view; main remains the default landing surface
 - File-path argv triggers immediate load + play
 - Stateless rendering; UI subscribes to engine events
 
@@ -151,6 +156,7 @@ Each phase produces something runnable and testable. A phase is "done" when its 
 - Window opens on Hyprland and a default dark theme renders
 - Click play / pause / next; controls work
 - File argument loads track on launch
+- Pipeline view shows live, populated readouts during playback: per-stage formats, ring fill, frames written, DAC capability matrix, bit-perfect verdict with per-condition breakdown
 
 ---
 
