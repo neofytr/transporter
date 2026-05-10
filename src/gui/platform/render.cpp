@@ -5,6 +5,10 @@
 
 #include "platform_internal.hpp"
 
+// AlbumArt is a plain struct with a pixel pointer; include the header so the
+// renderer can cast ImTextureID back to it for image blits.
+#include "../views/albumart.hpp"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -137,6 +141,19 @@ void render_frame(WindowImpl& w, float r, float g, float b) {
                 idx += cmd.ElemCount;
                 continue;
             }
+
+            // Determine whether this draw command uses a user texture (AlbumArt)
+            // or the font atlas. The font atlas TextureId is set by ImGui to
+            // the value we stored; anything else is cast back to AlbumArt*.
+            const ImTextureID font_id = ImGui::GetIO().Fonts->TexID;
+            const bool is_user_tex = (cmd.TextureId != font_id) && (cmd.TextureId != ImTextureID{});
+            const transporter::gui::AlbumArt* art = nullptr;
+            if (is_user_tex) {
+                art = reinterpret_cast<const transporter::gui::AlbumArt*>(cmd.TextureId);
+                // Sanity: if pixels are null, fall back to font-atlas path.
+                if (!art || !art->pixels) { art = nullptr; }
+            }
+
             const ImVec4 clip = cmd.ClipRect;
             unsigned ei = 0;
             while (ei < cmd.ElemCount) {
@@ -150,11 +167,52 @@ void render_frame(WindowImpl& w, float r, float g, float b) {
                         const ImDrawVert& vb = vtx[i1];
                         const ImDrawVert& vc = vtx[i2];
                         const ImDrawVert& vd = vtx[i5];
+
+                        const float x0 = std::min({va.pos.x, vb.pos.x, vc.pos.x, vd.pos.x});
+                        const float y0 = std::min({va.pos.y, vb.pos.y, vc.pos.y, vd.pos.y});
+                        const float x1 = std::max({va.pos.x, vb.pos.x, vc.pos.x, vd.pos.x});
+                        const float y1 = std::max({va.pos.y, vb.pos.y, vc.pos.y, vd.pos.y});
+
+                        const int rx0 = std::max({static_cast<int>(x0), static_cast<int>(clip.x), 0});
+                        const int ry0 = std::max({static_cast<int>(y0), static_cast<int>(clip.y), 0});
+                        const int rx1 = std::min({static_cast<int>(x1), static_cast<int>(clip.z), w.width});
+                        const int ry1 = std::min({static_cast<int>(y1), static_cast<int>(clip.w), w.height});
+
+                        if (art && art->width > 0 && art->height > 0) {
+                            // Image blit: nearest-neighbour sample from AlbumArt pixel buffer.
+                            // UV coordinates come from the four vertices; compute per-pixel.
+                            // va=top-left, vb=top-right, vc=bottom-right, vd=bottom-left
+                            // (ImGui AddImage emits {tl,tr,br, tl,br,bl}).
+                            const float uv_x0 = std::min({va.uv.x, vb.uv.x, vc.uv.x, vd.uv.x});
+                            const float uv_y0 = std::min({va.uv.y, vb.uv.y, vc.uv.y, vd.uv.y});
+                            const float uv_x1 = std::max({va.uv.x, vb.uv.x, vc.uv.x, vd.uv.x});
+                            const float uv_y1 = std::max({va.uv.y, vb.uv.y, vc.uv.y, vd.uv.y});
+                            const float quad_w = x1 - x0;
+                            const float quad_h = y1 - y0;
+                            if (rx0 < rx1 && ry0 < ry1 && quad_w > 0.5f && quad_h > 0.5f) {
+                                const uint32_t src_a = (va.col >> 24) & 0xFFu;
+                                for (int py = ry0; py < ry1; ++py) {
+                                    const float t = (static_cast<float>(py) + 0.5f - y0) / quad_h;
+                                    const float v = uv_y0 + t * (uv_y1 - uv_y0);
+                                    const int ty = std::clamp(static_cast<int>(v * static_cast<float>(art->height)),
+                                                              0, art->height - 1);
+                                    uint32_t* out = pixels + py * pstride + rx0;
+                                    for (int px = rx0; px < rx1; ++px) {
+                                        const float s = (static_cast<float>(px) + 0.5f - x0) / quad_w;
+                                        const float u = uv_x0 + s * (uv_x1 - uv_x0);
+                                        const int tx = std::clamp(static_cast<int>(u * static_cast<float>(art->width)),
+                                                                  0, art->width - 1);
+                                        const uint32_t texel = art->pixels[static_cast<std::size_t>(ty * art->width + tx)];
+                                        const uint32_t written = (src_a >= 255u) ? texel : blend_over(*out, texel, src_a);
+                                        *out++ = written;
+                                    }
+                                }
+                            }
+                            ei += 6;
+                            continue;
+                        }
+
                         if (va.col == vb.col && va.col == vc.col && va.col == vd.col) {
-                            const float x0 = std::min({va.pos.x, vb.pos.x, vc.pos.x, vd.pos.x});
-                            const float y0 = std::min({va.pos.y, vb.pos.y, vc.pos.y, vd.pos.y});
-                            const float x1 = std::max({va.pos.x, vb.pos.x, vc.pos.x, vd.pos.x});
-                            const float y1 = std::max({va.pos.y, vb.pos.y, vc.pos.y, vd.pos.y});
                             // Centre UV — sample atlas once for the whole quad
                             const float cu = (va.uv.x + vb.uv.x + vc.uv.x + vd.uv.x) * 0.25f;
                             const float cv = (va.uv.y + vb.uv.y + vc.uv.y + vd.uv.y) * 0.25f;
@@ -167,11 +225,6 @@ void render_frame(WindowImpl& w, float r, float g, float b) {
                             const uint32_t src_a = (va.col >> 24) & 0xFFu;
                             const uint32_t alpha = (src_a * tex_alpha) / 255u;
                             const uint32_t src = to_xrgb(va.col);
-
-                            const int rx0 = std::max({static_cast<int>(x0), static_cast<int>(clip.x), 0});
-                            const int ry0 = std::max({static_cast<int>(y0), static_cast<int>(clip.y), 0});
-                            const int rx1 = std::min({static_cast<int>(x1), static_cast<int>(clip.z), w.width});
-                            const int ry1 = std::min({static_cast<int>(y1), static_cast<int>(clip.w), w.height});
 
                             if (rx0 < rx1 && ry0 < ry1) {
                                 if (alpha >= 255u) {

@@ -13,9 +13,13 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 
@@ -440,6 +444,37 @@ void draw_pipeline_view(AppState& st) {
         snap = st.engine_->pipeline_snapshot();
     }
     draw_pipeline_view_with_snapshot(snap);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    if (ImGui::Button("Export snapshot")) {
+        // Write pipeline snapshot to ~/.cache/transporter/snapshot_<timestamp>.txt
+        const auto exp_snap = st.engine_ ? st.engine_->pipeline_snapshot()
+                                         : engine::PipelineSnapshot{};
+        const char* home = std::getenv("HOME");
+        if (home) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path dir = fs::path{home} / ".cache" / "transporter";
+            fs::create_directories(dir, ec);
+            if (!ec) {
+                const auto ts = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                char fname[64];
+                std::snprintf(fname, sizeof(fname), "snapshot_%lld.txt",
+                              static_cast<long long>(ts));
+                const fs::path out = dir / fname;
+                if (std::ofstream f{out}; f) {
+                    st.engine_->dump_trace(f);
+                    st.push_log("snapshot exported: " + out.string());
+                    st.push_toast("exported: " + out.string(), 3.0f);
+                }
+            }
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Write pipeline trace to ~/.cache/transporter/");
+    }
 }
 
 } // namespace transporter::gui

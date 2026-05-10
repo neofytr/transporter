@@ -1,5 +1,7 @@
 wayland_client_dep = dependency('wayland-client')
 xkbcommon_dep      = dependency('xkbcommon')
+libpng_dep         = dependency('libpng')
+libjpeg_dep        = dependency('libjpeg')
 
 wayland_scanner = find_program('wayland-scanner')
 
@@ -42,6 +44,7 @@ gui_sources = files(
   'views/app.cpp',
   'views/main.cpp',
   'views/library.cpp',
+  'views/albumart.cpp',
   'views/pipeline.cpp',
   'views/queue.cpp',
 )
@@ -61,6 +64,8 @@ gui_lib = static_library(
     theme_dep,
     wayland_client_dep,
     xkbcommon_dep,
+    libpng_dep,
+    libjpeg_dep,
   ],
   cpp_args : ['-Wno-old-style-cast'],
 )
@@ -77,5 +82,7 @@ gui_dep = declare_dependency(
     theme_dep,
     wayland_client_dep,
     xkbcommon_dep,
+    libpng_dep,
+    libjpeg_dep,
   ],
 )

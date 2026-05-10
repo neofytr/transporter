@@ -4,6 +4,7 @@
 // Search box at top binds to Library::search.
 
 #include "app.hpp"
+#include "albumart.hpp"
 
 #include <transporter/library/library.hpp>
 
@@ -12,13 +13,69 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 
 namespace transporter::gui {
 
 namespace {
 
 constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
+
+constexpr float kThumbSize = 64.0f;
+
+// Per-album art cache. Key is album id; value is the decoded art (or an
+// empty AlbumArt if no cover was found, so we don't re-probe every frame).
+// Lives for the process lifetime — albums don't change without restart.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::unordered_map<std::int64_t, AlbumArt> g_art_cache;
+
+// Returns a stable colour for a given album id, used for the placeholder swatch.
+static inline ImU32 album_placeholder_color(std::int64_t id) {
+    // Spread the id through a simple hash to get varied hues.
+    const auto h = static_cast<uint32_t>(static_cast<uint64_t>(id) * 2654435761ULL);
+    const uint8_t r = 80u  + static_cast<uint8_t>((h & 0x3Fu) * 2u);
+    const uint8_t g = 60u  + static_cast<uint8_t>(((h >> 8u)  & 0x3Fu) * 2u);
+    const uint8_t b = 100u + static_cast<uint8_t>(((h >> 16u) & 0x3Fu) * 2u);
+    return IM_COL32(r, g, b, 255);
+}
+
+// Draw a thumbnail for the album at the current cursor position.
+// Advances the cursor by kThumbSize + a small gap on the Y axis.
+void draw_album_thumb(std::int64_t album_id, const std::string& album_title,
+                      const std::filesystem::path& first_track_dir) {
+    // Probe/load on first encounter.
+    if (g_art_cache.find(album_id) == g_art_cache.end()) {
+        g_art_cache[album_id] = load_album_art(first_track_dir);
+    }
+
+    const AlbumArt& art = g_art_cache[album_id];
+    const ImVec2 pos = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    if (art) {
+        // Image draw: UV (0,0)→(1,1) maps full image to the square.
+        dl->AddImage(art.texture_id(), pos,
+                     ImVec2(pos.x + kThumbSize, pos.y + kThumbSize),
+                     ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f));
+    } else {
+        // Placeholder: muted colour square with the first letter of the title.
+        const ImU32 col = album_placeholder_color(album_id);
+        dl->AddRectFilled(pos, ImVec2(pos.x + kThumbSize, pos.y + kThumbSize), col, 4.0f);
+        if (!album_title.empty()) {
+            char initial[2] = { album_title[0], '\0' };
+            const ImVec2 tsz = ImGui::CalcTextSize(initial);
+            dl->AddText(ImVec2(pos.x + (kThumbSize - tsz.x) * 0.5f,
+                               pos.y + (kThumbSize - tsz.y) * 0.5f),
+                        IM_COL32(220, 220, 230, 255), initial);
+        }
+    }
+
+    // Reserve vertical space so ImGui layout flows below the thumbnail.
+    ImGui::Dummy(ImVec2(kThumbSize, kThumbSize));
+    ImGui::Spacing();
+}
 
 const char* scan_state_name(library::ScanState s) {
     switch (s) {
@@ -171,6 +228,10 @@ void draw_library_view(AppState& st) {
                             st.selected_album_id = al.id;
                         }
                         if (auto tracks = st.library_->tracks_in_album(al.id); tracks) {
+                            if (!tracks->empty()) {
+                                draw_album_thumb(al.id, al.title,
+                                                 (*tracks)[0].path.parent_path());
+                            }
                             for (std::size_t ti = 0; ti < tracks->size(); ++ti) {
                                 const auto& t = (*tracks)[ti];
                                 char row[256];
