@@ -74,3 +74,6 @@ executable(
   link_with : transporter_modules,
   install : true,
 )
+
+subdir('tests/unit')
+subdir('tests/integration')
