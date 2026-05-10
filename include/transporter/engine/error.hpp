@@ -22,6 +22,9 @@ enum class ErrorCode : std::uint8_t {
     DecoderInitFailed,
     DecoderReadFailed,
     DecoderSeekFailed,
+    Sqlite,
+    InvalidArgument,
+    NotFound,
 };
 
 // Sub-reason for FormatNotSupported so the test driver can be specific
@@ -57,6 +60,12 @@ constexpr std::string_view error_code_name(ErrorCode c) noexcept {
         return "DecoderReadFailed";
     case ErrorCode::DecoderSeekFailed:
         return "DecoderSeekFailed";
+    case ErrorCode::Sqlite:
+        return "Sqlite";
+    case ErrorCode::InvalidArgument:
+        return "InvalidArgument";
+    case ErrorCode::NotFound:
+        return "NotFound";
     }
     return "?";
 }

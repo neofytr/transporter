@@ -27,3 +27,9 @@ test_telemetry_dump = executable(
   'telemetry_dump.cpp',
   dependencies : [engine_dep],
 )
+
+test_library_browse = executable(
+  'test_library_browse',
+  'library_browse.cpp',
+  dependencies : [library_dep],
+)

@@ -122,3 +122,38 @@ test('hotplug_fsm',
   test_hotplug_fsm,
   args : [meson.project_source_root() / 'fixtures' / 'sine_44100_16.flac'],
 )
+
+test_library_schema = executable(
+  'test_library_schema',
+  'library_schema.cpp',
+  dependencies : [library_dep],
+)
+test('library_schema', test_library_schema)
+
+test_library_scan = executable(
+  'test_library_scan',
+  'library_scan.cpp',
+  dependencies : [library_dep],
+)
+test('library_scan',
+  test_library_scan,
+  args : [
+    meson.project_source_root() / 'tests' / 'data' / 'library',
+    meson.project_build_root() / 'tests' / 'library_scan_tree',
+  ],
+  timeout : 60,
+)
+
+test_library_search = executable(
+  'test_library_search',
+  'library_search.cpp',
+  dependencies : [library_dep],
+)
+test('library_search',
+  test_library_search,
+  args : [
+    meson.project_source_root() / 'tests' / 'data' / 'library',
+    meson.project_build_root() / 'tests' / 'library_search_tree',
+  ],
+  timeout : 60,
+)
