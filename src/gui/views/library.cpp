@@ -196,6 +196,21 @@ void draw_library_view(AppState& st) {
                             }
                         }
                     }
+                    if (ImGui::BeginPopupContextItem(hdr)) {
+                        if (ImGui::MenuItem("Play album")) {
+                            if (auto tracks = st.library_->tracks_in_album(al.id); tracks && !tracks->empty()) {
+                                play_album(st, *tracks, 0);
+                            }
+                        }
+                        if (ImGui::MenuItem("Add album to queue")) {
+                            if (auto tracks = st.library_->tracks_in_album(al.id); tracks) {
+                                for (const auto& t : *tracks) {
+                                    st.queue_append(t.path);
+                                }
+                            }
+                        }
+                        ImGui::EndPopup();
+                    }
                 }
             }
         } else {

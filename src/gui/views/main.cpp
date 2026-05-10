@@ -105,19 +105,19 @@ void empty_state(AppState& st) {
 void verdict_badge(const engine::PipelineSnapshot& s) {
     using L = engine::BitPerfectVerdict::Level;
     ImVec4 col = kFail;
-    const char* tag = "NO";
     if (s.bit_perfect.level == L::Yes) {
         col = kPass;
-        tag = "YES";
     } else if (s.bit_perfect.level == L::Qualified) {
         col = kWarn;
-        tag = "QUAL";
     }
-    ImGui::PushStyleColor(ImGuiCol_Button, col);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, col);
-    ImGui::SmallButton(tag);
-    ImGui::PopStyleColor(3);
+    // Draw a small filled circle using ImDrawList; Dummy creates the hover region.
+    const float radius = 6.0f;
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    const float cy = cursor.y + ImGui::GetTextLineHeight() * 0.5f;
+    ImGui::GetWindowDrawList()->AddCircleFilled(
+        ImVec2(cursor.x + radius, cy), radius,
+        ImGui::ColorConvertFloat4ToU32(col));
+    ImGui::Dummy(ImVec2(radius * 2.0f + 4.0f, ImGui::GetTextLineHeight()));
     if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::Text("digital path bit-perfect: %s",
@@ -213,6 +213,21 @@ void draw_main_view(AppState& st) {
         (void)st.engine_->seek(target);
     }
 
+    if (snap.ring.capacity_bytes > 0) {
+        const float ring_fill = std::clamp(
+            static_cast<float>(snap.ring.fill_bytes) /
+            static_cast<float>(snap.ring.capacity_bytes),
+            0.0f, 1.0f);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::ProgressBar(ring_fill, ImVec2(-FLT_MIN, 3.0f), "");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("ring buffer %.0f%% full  (%zu / %zu bytes)",
+                              ring_fill * 100.0f,
+                              snap.ring.fill_bytes,
+                              snap.ring.capacity_bytes);
+        }
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
@@ -260,6 +275,32 @@ void draw_main_view(AppState& st) {
         ImGui::SetTooltip("Stop playback and release exclusive ALSA hold so "
                           "other apps can use the DAC.");
     }
+
+    ImGui::SameLine();
+    // Shuffle toggle
+    if (st.shuffle) ImGui::PushStyleColor(ImGuiCol_Button, kPass);
+    if (ImGui::SmallButton("shuf")) {
+        st.queue_shuffle_toggle();
+    }
+    if (st.shuffle) ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("shuffle: %s", st.shuffle ? "on" : "off");
+
+    ImGui::SameLine();
+    // Repeat mode cycling: None → One → All → None
+    const char* rep_label = "rep:off";
+    if (st.repeat_mode == AppState::RepeatMode::One) rep_label = "rep:1";
+    else if (st.repeat_mode == AppState::RepeatMode::All) rep_label = "rep:all";
+    const bool rep_active = (st.repeat_mode != AppState::RepeatMode::None);
+    if (rep_active) ImGui::PushStyleColor(ImGuiCol_Button, kPass);
+    if (ImGui::SmallButton(rep_label)) {
+        switch (st.repeat_mode) {
+        case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One; break;
+        case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All; break;
+        case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+        }
+    }
+    if (rep_active) ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("repeat mode");
 
     ImGui::Spacing();
 

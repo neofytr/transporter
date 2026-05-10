@@ -54,6 +54,9 @@ struct AppState {
     std::mutex queue_mtx;
     std::vector<std::filesystem::path> queue;
     std::int32_t queue_index = -1;
+    bool shuffle = false;
+    enum class RepeatMode : std::uint8_t { None, One, All };
+    RepeatMode repeat_mode = RepeatMode::None;
 
     ViewId current_view = ViewId::Main;
 
@@ -93,6 +96,7 @@ struct AppState {
     bool queue_jump_to(std::int32_t idx);
     void queue_remove(std::int32_t idx);
     void queue_clear();
+    void queue_shuffle_toggle();
 };
 
 // Each draw_* fn renders a single ImGui window's contents within the current

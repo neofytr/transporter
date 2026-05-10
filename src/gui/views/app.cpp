@@ -21,6 +21,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -125,13 +126,39 @@ std::vector<LogEntry> AppState::snapshot_log(std::size_t max) const {
 
 std::optional<std::filesystem::path> AppState::queue_next() {
     std::lock_guard lk(queue_mtx);
-    if (queue.empty()) {
+    if (queue.empty()) return std::nullopt;
+
+    if (repeat_mode == RepeatMode::One) {
+        // Stay on current track
+        if (queue_index < 0 || queue_index >= static_cast<std::int32_t>(queue.size()))
+            return std::nullopt;
+        return queue[static_cast<std::size_t>(queue_index)];
+    }
+
+    if (shuffle) {
+        // Pick a random track other than the current one (if more than 1 track).
+        if (queue.size() == 1) {
+            if (repeat_mode == RepeatMode::All) return queue[0];
+            return std::nullopt;
+        }
+        std::int32_t next;
+        do {
+            next = static_cast<std::int32_t>(
+                static_cast<std::size_t>(std::rand()) % queue.size());
+        } while (next == queue_index);
+        queue_index = next;
+        return queue[static_cast<std::size_t>(queue_index)];
+    }
+
+    const std::int32_t next = queue_index + 1;
+    if (next >= static_cast<std::int32_t>(queue.size())) {
+        if (repeat_mode == RepeatMode::All) {
+            queue_index = 0;
+            return queue[0];
+        }
         return std::nullopt;
     }
-    if (queue_index + 1 >= static_cast<std::int32_t>(queue.size())) {
-        return std::nullopt;
-    }
-    ++queue_index;
+    queue_index = next;
     return queue[static_cast<std::size_t>(queue_index)];
 }
 
@@ -208,6 +235,10 @@ void AppState::queue_clear() {
     std::lock_guard lk(queue_mtx);
     queue.clear();
     queue_index = -1;
+}
+
+void AppState::queue_shuffle_toggle() {
+    shuffle = !shuffle;
 }
 
 namespace {
