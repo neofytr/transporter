@@ -1,47 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Window lifecycle: Wayland -> xdg-shell -> EGL -> ImGui, in that order.
-// Bringing up the window without a compositor is the most likely failure
-// case; the InitError taxonomy lets the caller log a clean message.
+// Window lifecycle: Wayland → xdg-shell → wl_shm → ImGui (software render).
 
 #include "platform.hpp"
 #include "platform_internal.hpp"
 
 #include <imgui.h>
-#include <backends/imgui_impl_opengl3.h>
 
 #include <poll.h>
 
 #include <cerrno>
 #include <chrono>
-#include <cstdio>
 #include <filesystem>
-
-// Forward declarations of the three GL symbols we touch directly. Defined by
-// libGL (or libEGL via OpenGL ES); imgui_impl_opengl3 already pulls in its
-// own loader for the rest. Using extern "C" here keeps us out of any
-// platform-specific gl.h ABI variation.
-extern "C" {
-    void glClearColor(float r, float g, float b, float a);
-    void glClear(unsigned int mask);
-    void glViewport(int x, int y, int w, int h);
-}
-constexpr unsigned kGlColorBufferBit = 0x00004000u;
 
 namespace transporter::gui::platform {
 
 const char* init_error_message(InitError e) noexcept {
     switch (e) {
-    case InitError::NoDisplay:
-        return "failed to connect to Wayland: no display environment";
-    case InitError::MissingProtocol:
-        return "Wayland compositor missing required protocols (xdg_wm_base, wl_compositor)";
-    case InitError::EglInitFailed:
-        return "EGL initialization failed";
-    case InitError::GlLoadFailed:
-        return "OpenGL 3.3 context creation failed";
-    case InitError::OutOfMemory:
-        return "out of memory during GUI initialization";
+    case InitError::NoDisplay:        return "failed to connect to Wayland display";
+    case InitError::MissingProtocol:  return "compositor missing required protocol (xdg_wm_base / wl_shm)";
+    case InitError::EglInitFailed:    return "wl_shm buffer allocation failed";
+    case InitError::GlLoadFailed:     return "ImGui font build failed";
+    case InitError::OutOfMemory:      return "out of memory";
     }
     return "unknown init error";
 }
@@ -49,14 +29,11 @@ const char* init_error_message(InitError e) noexcept {
 Window::Window() : impl_(std::make_unique<WindowImpl>()) {}
 
 Window::~Window() {
-    if (impl_ == nullptr) {
-        return;
-    }
-    if (ImGui::GetCurrentContext() != nullptr) {
-        ImGui_ImplOpenGL3_Shutdown();
+    if (!impl_) return;
+    if (ImGui::GetCurrentContext()) {
         ImGui::DestroyContext();
     }
-    destroy_egl(*impl_);
+    destroy_shm(*impl_);
     destroy_input(*impl_);
     destroy_surface(*impl_);
     destroy_wayland(*impl_);
@@ -66,33 +43,23 @@ std::expected<std::unique_ptr<Window>, InitError>
 Window::create(const WindowConfig& cfg) {
     auto w = std::unique_ptr<Window>(new Window());
     auto& s = *w->impl_;
-    s.title = cfg.title;
-    s.width = cfg.default_width;
+    s.title  = cfg.title;
+    s.width  = cfg.default_width;
     s.height = cfg.default_height;
 
     if (!init_wayland(s)) {
-        const bool no_display = (s.display == nullptr);
-        return std::unexpected(no_display ? InitError::NoDisplay
-                                          : InitError::MissingProtocol);
-    }
-    if (s.compositor == nullptr || s.wm_base == nullptr) {
-        return std::unexpected(InitError::MissingProtocol);
+        return std::unexpected(s.display ? InitError::MissingProtocol
+                                         : InitError::NoDisplay);
     }
 
     register_seat(s);
-
-    // Seat capabilities arrive after the listener is attached; this
-    // roundtrip ensures the pointer and keyboard objects are created
-    // before we bring up the surface.
     if (wl_display_roundtrip(s.display) < 0) {
         return std::unexpected(InitError::MissingProtocol);
     }
-
     if (!init_surface(s, cfg.title)) {
         return std::unexpected(InitError::MissingProtocol);
     }
-
-    if (!init_egl(s)) {
+    if (!init_shm(s)) {
         return std::unexpected(InitError::EglInitFailed);
     }
 
@@ -100,74 +67,59 @@ Window::create(const WindowConfig& cfg) {
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;  // do not write imgui.ini to the cwd
+    io.IniFilename = nullptr;
 
-    // Load JetBrainsMono Nerd Font at 17px for a clean, readable size.
-    // Fall back to the built-in bitmap font at 15px if unavailable.
     constexpr const char* kFont =
         "/home/raj/.local/share/fonts/JetBrainsMono/"
         "JetBrainsMonoNerdFont-Regular.ttf";
     if (std::filesystem::exists(kFont)) {
         io.Fonts->AddFontFromFileTTF(kFont, 17.0f);
     } else {
-        ImFontConfig cfg;
-        cfg.SizePixels = 15.0f;
-        io.Fonts->AddFontDefault(&cfg);
+        ImFontConfig fcfg;
+        fcfg.SizePixels = 15.0f;
+        io.Fonts->AddFontDefault(&fcfg);
     }
-    io.DisplaySize = ImVec2(static_cast<float>(s.width),
-                            static_cast<float>(s.height));
-    if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
+
+    // Build font atlas into CPU memory; set a dummy texture ID (no GPU upload).
+    if (!io.Fonts->Build()) {
         return std::unexpected(InitError::GlLoadFailed);
     }
+    io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+
+    io.DisplaySize = ImVec2(static_cast<float>(s.width),
+                            static_cast<float>(s.height));
+    io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
     return w;
 }
 
 bool Window::poll() {
-    if (impl_->display == nullptr) {
-        return false;
-    }
+    if (!impl_->display) return false;
 
-    // Drain anything already queued (mesa's EGL backend may have read frame
-    // callbacks into the queue during the prior eglSwapBuffers wait).
-    if (wl_display_dispatch_pending(impl_->display) < 0) {
-        return false;
-    }
+    if (wl_display_dispatch_pending(impl_->display) < 0) return false;
 
-    // Read fresh events off the socket via the prepare-read / read_events /
-    // dispatch_pending dance. Without this the queue stays empty: input,
-    // configure, and frame_done events never arrive, so the next vsync
-    // swap blocks forever and the window appears frozen.
     while (wl_display_prepare_read(impl_->display) != 0) {
-        if (wl_display_dispatch_pending(impl_->display) < 0) {
-            return false;
-        }
+        if (wl_display_dispatch_pending(impl_->display) < 0) return false;
     }
     if (wl_display_flush(impl_->display) < 0 && errno != EAGAIN) {
         wl_display_cancel_read(impl_->display);
         return false;
     }
     pollfd pfd{wl_display_get_fd(impl_->display), POLLIN, 0};
-    int rc = ::poll(&pfd, 1, 8);  // 8 ms cap (~120 fps); NVidia EGL ignores SwapInterval
+    const int rc = ::poll(&pfd, 1, 8);
     if (rc > 0 && (pfd.revents & POLLIN) != 0) {
-        if (wl_display_read_events(impl_->display) < 0) {
-            return false;
-        }
-        if (wl_display_dispatch_pending(impl_->display) < 0) {
-            return false;
-        }
+        if (wl_display_read_events(impl_->display) < 0) return false;
+        if (wl_display_dispatch_pending(impl_->display) < 0) return false;
     } else {
         wl_display_cancel_read(impl_->display);
     }
-
     return !impl_->close_requested;
 }
 
 void Window::begin_frame() {
     if (impl_->needs_resize) {
-        egl_resize(*impl_);
+        shm_resize(*impl_);
         impl_->needs_resize = false;
     }
-    ImGui_ImplOpenGL3_NewFrame();
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(impl_->width),
                             static_cast<float>(impl_->height));
@@ -181,17 +133,14 @@ void Window::begin_frame() {
 
 bool Window::end_frame(float r, float g, float b) {
     ImGui::Render();
-    glViewport(0, 0, impl_->width, impl_->height);
-    glClearColor(r, g, b, 1.0f);
-    glClear(kGlColorBufferBit);
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-    return egl_swap(*impl_);
+    render_frame(*impl_, r, g, b);
+    shm_commit(*impl_);
+    return true;
 }
 
-int Window::framebuffer_width() const noexcept { return impl_->width; }
+int Window::framebuffer_width()  const noexcept { return impl_->width; }
 int Window::framebuffer_height() const noexcept { return impl_->height; }
-
-bool Window::close_requested() const noexcept { return impl_->close_requested; }
-void Window::request_close() noexcept { impl_->close_requested = true; }
+bool Window::close_requested()   const noexcept { return impl_->close_requested; }
+void Window::request_close()     noexcept       { impl_->close_requested = true; }
 
 } // namespace transporter::gui::platform

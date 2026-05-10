@@ -1,7 +1,4 @@
 wayland_client_dep = dependency('wayland-client')
-wayland_egl_dep    = dependency('wayland-egl')
-egl_dep            = dependency('egl')
-gl_dep             = dependency('gl')
 xkbcommon_dep      = dependency('xkbcommon')
 
 wayland_scanner = find_program('wayland-scanner')
@@ -39,6 +36,8 @@ gui_sources = files(
   'platform/wayland.cpp',
   'platform/xdg_shell.cpp',
   'platform/egl.cpp',
+  'platform/shm.cpp',
+  'platform/render.cpp',
   'platform/input.cpp',
   'views/app.cpp',
   'views/main.cpp',
@@ -61,9 +60,6 @@ gui_lib = static_library(
     dbus_dep,
     theme_dep,
     wayland_client_dep,
-    wayland_egl_dep,
-    egl_dep,
-    gl_dep,
     xkbcommon_dep,
   ],
   cpp_args : ['-Wno-old-style-cast'],
@@ -80,9 +76,6 @@ gui_dep = declare_dependency(
     dbus_dep,
     theme_dep,
     wayland_client_dep,
-    wayland_egl_dep,
-    egl_dep,
-    gl_dep,
     xkbcommon_dep,
   ],
 )

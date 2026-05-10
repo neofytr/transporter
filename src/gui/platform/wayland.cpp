@@ -30,6 +30,10 @@ void registry_global(void* data, wl_registry* reg, uint32_t name,
         const uint32_t use = version < 2 ? version : 2;
         w.output = static_cast<wl_output*>(
             wl_registry_bind(reg, name, &wl_output_interface, use));
+    } else if (std::strcmp(iface, wl_shm_interface.name) == 0) {
+        const uint32_t use = version < 1 ? version : 1;
+        w.shm = static_cast<wl_shm*>(
+            wl_registry_bind(reg, name, &wl_shm_interface, use));
     }
 }
 
@@ -62,6 +66,9 @@ bool init_wayland(WindowImpl& w) {
 
     if (w.compositor == nullptr || w.wm_base == nullptr) {
         return false;  // missing required globals
+    }
+    if (w.shm == nullptr) {
+        return false;
     }
 
     return true;
