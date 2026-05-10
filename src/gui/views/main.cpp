@@ -4,17 +4,23 @@
 // indicator. Empty state is the locked first-run UX.
 
 #include "app.hpp"
+#include "spectrum.hpp"
 
 #include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
+#include <transporter/engine/ring.hpp>
 #include <transporter/engine/telemetry.hpp>
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <complex>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <numbers>
 #include <string>
 
 namespace transporter::gui {
@@ -33,6 +39,61 @@ constexpr ImVec4 kPass{0.40f, 0.85f, 0.40f, 1.0f};
 constexpr ImVec4 kFail{0.95f, 0.40f, 0.35f, 1.0f};
 constexpr ImVec4 kWarn{0.95f, 0.75f, 0.30f, 1.0f};
 constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
+
+struct SpectrumState {
+    static constexpr std::size_t FFT_N = 1024;
+    static constexpr int BARS = 32;
+
+    std::array<float, FFT_N> sample_buf{};
+    std::size_t sample_pos = 0;
+    std::array<float, BARS> magnitudes{};
+    std::array<float, BARS> peaks{};
+
+    void ingest(const float* samples, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) {
+            sample_buf[sample_pos % FFT_N] = samples[i];
+            ++sample_pos;
+        }
+    }
+
+    void compute(std::uint32_t sample_rate_hz) {
+        if (sample_pos < FFT_N) return;
+
+        std::array<float, FFT_N> windowed;
+        for (std::size_t i = 0; i < FFT_N; ++i)
+            windowed[i] = sample_buf[(sample_pos - FFT_N + i) % FFT_N];
+        apply_hann(windowed);
+
+        std::array<std::complex<float>, FFT_N> cx{};
+        for (std::size_t i = 0; i < FFT_N; ++i)
+            cx[i] = {windowed[i], 0.0f};
+        fft(cx);
+
+        const float rate = static_cast<float>(sample_rate_hz > 0 ? sample_rate_hz : 44100);
+        const float bin_hz = rate / static_cast<float>(FFT_N);
+        const float log_lo = std::log10(20.0f);
+        const float log_hi = std::log10(20000.0f);
+
+        for (int b = 0; b < BARS; ++b) {
+            const float lo_hz = std::pow(10.0f, log_lo + (log_hi - log_lo) * static_cast<float>(b)     / BARS);
+            const float hi_hz = std::pow(10.0f, log_lo + (log_hi - log_lo) * static_cast<float>(b + 1) / BARS);
+            const int bin_lo = std::max(1, static_cast<int>(lo_hz / bin_hz));
+            const int bin_hi = std::min(static_cast<int>(FFT_N / 2),
+                                        static_cast<int>(hi_hz / bin_hz) + 1);
+
+            float mag = 0.0f;
+            for (int k = bin_lo; k < bin_hi; ++k)
+                mag = std::max(mag, std::abs(cx[k]));
+            float db = mag > 0.0f ? 20.0f * std::log10(mag / static_cast<float>(FFT_N / 2)) : -90.0f;
+            float norm = std::clamp((db + 90.0f) / 90.0f, 0.0f, 1.0f);
+            magnitudes[b] = norm > magnitudes[b] ? norm : magnitudes[b] * 0.85f;
+            if (norm >= peaks[b]) peaks[b] = norm;
+            else peaks[b] = std::max(0.0f, peaks[b] - 0.01f);
+        }
+    }
+};
+
+static SpectrumState g_spectrum;
 
 void dac_combo(AppState& st) {
     ImGui::TextColored(kMuted, "DAC:");
@@ -237,6 +298,50 @@ void draw_main_view(AppState& st) {
                               snap.ring.fill_bytes,
                               snap.ring.capacity_bytes);
         }
+    }
+
+    // Spectrum analyser
+    if (st.engine_ != nullptr) {
+        const auto* sring = st.engine_->spectrum_ring();
+        if (sring != nullptr) {
+            auto* rw_ring = const_cast<engine::SpscByteRing*>(sring);
+            float tmp[512];
+            const std::size_t avail = rw_ring->readable();
+            if (avail >= sizeof(float)) {
+                const std::size_t take = std::min(avail, sizeof(tmp));
+                auto sp = std::span<std::byte>(reinterpret_cast<std::byte*>(tmp), take);
+                const std::size_t got = rw_ring->read(sp);
+                g_spectrum.ingest(tmp, got / sizeof(float));
+            }
+            g_spectrum.compute(snap.source.sample_rate_hz);
+        }
+    }
+
+    // Draw bars
+    {
+        const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+        const float bar_total_w = ImGui::GetContentRegionAvail().x;
+        const float bar_h_max = 48.0f;
+        const float bar_w = bar_total_w / static_cast<float>(SpectrumState::BARS);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+        constexpr ImU32 kBarCol  = IM_COL32(80, 200, 120, 200);
+        constexpr ImU32 kPeakCol = IM_COL32(200, 240, 200, 180);
+
+        for (int b = 0; b < SpectrumState::BARS; ++b) {
+            const float x0 = canvas_pos.x + b * bar_w + 1.0f;
+            const float x1 = canvas_pos.x + (b + 1) * bar_w - 1.0f;
+            const float mag = g_spectrum.magnitudes[b];
+            const float pk  = g_spectrum.peaks[b];
+            const float bot = canvas_pos.y + bar_h_max;
+            const float top = canvas_pos.y + bar_h_max * (1.0f - mag);
+            if (top < bot)
+                dl->AddRectFilled({x0, top}, {x1, bot}, kBarCol);
+            const float pk_y = canvas_pos.y + bar_h_max * (1.0f - pk);
+            if (pk > 0.01f)
+                dl->AddLine({x0, pk_y}, {x1, pk_y}, kPeakCol);
+        }
+        ImGui::Dummy({bar_total_w, bar_h_max + 2.0f});
     }
 
     ImGui::Spacing();

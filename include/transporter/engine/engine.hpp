@@ -6,6 +6,7 @@
 #include <transporter/engine/decoder.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/engine/format.hpp>
+#include <transporter/engine/ring.hpp>
 #include <transporter/engine/telemetry.hpp>
 
 #include <chrono>
@@ -144,6 +145,12 @@ public:
     // Dump the in-memory trace ring as one event per line. Format is stable
     // enough for grep / awk; not a binary protocol.
     void dump_trace(std::ostream& os) const;
+
+    // Returns pointer to the spectrum sample ring. Carries float32 mono
+    // (channel-0 only) samples at the native playback rate. GUI thread owns
+    // the consumer side; audio thread is the producer. Null when no track
+    // is loaded.
+    const SpscByteRing* spectrum_ring() const noexcept;
 
     // Single-listener. Caller-side fan-out is the consumer's job.
     void set_event_callback(EventCallback cb);

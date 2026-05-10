@@ -44,6 +44,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cstring>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -185,6 +186,7 @@ struct Engine::Impl {
     std::unique_ptr<IDecoder> decoder;
     std::unique_ptr<detail::IOutput> output;
     std::unique_ptr<SpscByteRing> ring;
+    std::unique_ptr<SpscByteRing> spec_ring;  // float32 mono tap for spectrum; 4096-sample capacity
     std::thread decoder_thread;
     std::thread audio_thread;
 
@@ -523,6 +525,48 @@ struct Engine::Impl {
                 ev.large_b = pi.period_frames;
                 (void)trace_ring->push(ev);
             }
+            // Tap channel-0 samples into spec_ring for the spectrum analyser.
+            // Non-blocking: skip if the ring is full. Never allocates.
+            if (spec_ring && spec_ring->writable() >= sizeof(float)) {
+                const std::size_t n_frames = got / frame_bytes;
+                const std::size_t tap = std::min(n_frames, std::size_t{512});
+                float fbuf[512];
+                for (std::size_t fi = 0; fi < tap; ++fi) {
+                    const std::byte* frame = buf.data() + fi * frame_bytes;
+                    float s = 0.0f;
+                    switch (fmt.sample_format) {
+                    case SampleFormat::S16_LE: {
+                        std::int16_t v{};
+                        std::memcpy(&v, frame, 2);
+                        s = v / 32768.0f;
+                        break;
+                    }
+                    case SampleFormat::S24_LE:
+                    case SampleFormat::S32_LE: {
+                        std::int32_t v{};
+                        std::memcpy(&v, frame, 4);
+                        s = v / 2147483648.0f;
+                        break;
+                    }
+                    case SampleFormat::S24_3LE: {
+                        std::int32_t v = 0;
+                        std::memcpy(&v, frame, 3);
+                        if (v & 0x800000) v |= 0xFF000000;
+                        s = v / 8388608.0f;
+                        break;
+                    }
+                    case SampleFormat::FLOAT_LE: {
+                        std::memcpy(&s, frame, 4);
+                        break;
+                    }
+                    }
+                    fbuf[fi] = s;
+                }
+                const auto fspan = std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(fbuf),
+                    tap * sizeof(float));
+                (void)spec_ring->write(fspan);
+            }
         }
 
         if (trace_ring) {
@@ -619,6 +663,7 @@ struct Engine::Impl {
         }
         decoder.reset();
         ring.reset();
+        spec_ring.reset();
         // Drop any staged preload: the new run will preload fresh.
         {
             std::lock_guard nlk(next_mtx);
@@ -751,6 +796,7 @@ struct Engine::Impl {
         }
 
         ring = std::make_unique<SpscByteRing>(round_up_pow2(cfg.ring_capacity_bytes));
+        spec_ring = std::make_unique<SpscByteRing>(4096 * sizeof(float));
         decoder = std::move(*dec);
         {
             std::lock_guard lk(fmt_mtx);
@@ -1609,6 +1655,10 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
     }
 
     return s;
+}
+
+const SpscByteRing* Engine::spectrum_ring() const noexcept {
+    return impl_->spec_ring.get();
 }
 
 void Engine::dump_trace(std::ostream& os) const {
