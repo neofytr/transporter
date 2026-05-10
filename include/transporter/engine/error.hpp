@@ -19,6 +19,9 @@ enum class ErrorCode : std::uint8_t {
     DeviceBusy,
     DeviceParamsRejected,
     WriteFailed,
+    DecoderInitFailed,
+    DecoderReadFailed,
+    DecoderSeekFailed,
 };
 
 // Sub-reason for FormatNotSupported so the test driver can be specific
@@ -48,6 +51,12 @@ constexpr std::string_view error_code_name(ErrorCode c) noexcept {
         return "DeviceParamsRejected";
     case ErrorCode::WriteFailed:
         return "WriteFailed";
+    case ErrorCode::DecoderInitFailed:
+        return "DecoderInitFailed";
+    case ErrorCode::DecoderReadFailed:
+        return "DecoderReadFailed";
+    case ErrorCode::DecoderSeekFailed:
+        return "DecoderSeekFailed";
     }
     return "?";
 }

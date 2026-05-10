@@ -1,21 +1,44 @@
 # Test fixtures
 
-Hand-generated PCM WAV files used by the engine integration and unit tests.
-Regenerate with:
+Hand-generated audio files used by engine integration and unit tests.
+
+Two generators live here:
+
+- `_make_sine.py` — base WAV fixtures (Phase 1). Standard library only.
+- `_make_format_set.sh` — Phase-2 per-format fixtures, derived from
+  `sine_44100_16.wav` via `ffmpeg`.
+
+Regenerate everything with:
 
     python3 fixtures/_make_sine.py
+    bash   fixtures/_make_format_set.sh
 
-| File | Rate | Channels | Format | Length | Content |
+| File | Rate | Channels | Decoder format | Length | Content |
 |---|---|---|---|---|---|
-| `sine_44100_16.wav` | 44100 Hz | 1 | `S16_LE` (PCM) | 2.0 s | 440 Hz sine, -12 dBFS |
-| `sine_44100_24.wav` | 44100 Hz | 1 | `S24_3LE` (PCM, 3 bytes/sample) | 2.0 s | 440 Hz sine, -12 dBFS |
+| `sine_44100_16.wav` | 44100 | 1 | `S16_LE` | 2.0 s | 440 Hz, -12 dBFS |
+| `sine_44100_24.wav` | 44100 | 1 | `S24_3LE` | 2.0 s | 440 Hz, -12 dBFS |
+| `sine_44100_16.aiff` | 44100 | 1 | `S16_LE` (BE on disk; decoder swaps) | 2.0 s | 440 Hz |
+| `sine_44100_16.flac` | 44100 | 1 | `S16_LE` | 2.0 s | 440 Hz |
+| `sine_44100_16.m4a` | 44100 | 1 | `S16_LE` (ALAC) | 2.0 s | 440 Hz |
+| `sine_44100_16.mp3` | 44100 | 1 | `S16_LE` (MPEG L3, 192 kbps) | ~2.0 s | 440 Hz |
+| `sine_44100_16.ogg` | 44100 | 1 | `FLOAT_LE` (Vorbis q5) | ~2.0 s | 440 Hz |
+| `sine_44100_16.opus` | 48000 | 1 | `FLOAT_LE` (Opus 96 kbps) | ~2.0 s | 440 Hz |
 
-The 24-bit fixture exists to drive the format-mismatch refusal test against a
-synthetic device whose accepted format set excludes `S24_3LE`. Both files use
-the basic `WAVE_FORMAT_PCM` tag (no `WAVE_FORMAT_EXTENSIBLE`); the parser
-also handles `EXTENSIBLE` with PCM / IEEE_FLOAT GUIDs but no fixture exercises
-that path yet.
+Tags embedded by `_make_format_set.sh`:
 
-`_make_sine.py` uses only the Python standard library (`wave`, `struct`,
-`math`), so the script runs without extra dependencies on any current Linux
-distribution.
+    artist  = transporter test
+    album   = phase2 fixtures
+    title   = sine 440Hz
+    track   = 1
+    date    = 2024
+
+WAV files do not carry tags — the WAV writer used by `_make_sine.py` does
+not emit a `LIST/INFO` chunk. The unit test for WAV asserts empty tags.
+
+The 24-bit WAV exists to drive the format-mismatch refusal test against a
+synthetic device whose accepted format set excludes `S24_3LE`.
+
+The Opus fixture is 48 kHz because libopusfile always reports its output
+at 48 kHz (Opus is internally 48 kHz). The decoder declares 48 kHz; the
+engine's format-match step will refuse to play if the DAC won't accept it.
+This is by design — bit-perfect promises mean no silent resampling.

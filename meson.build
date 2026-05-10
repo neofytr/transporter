@@ -1,6 +1,6 @@
 project(
   'transporter',
-  'cpp',
+  ['cpp', 'c'],
   version : '0.0.0',
   license : 'GPL-3.0-or-later',
   meson_version : '>=1.1.0',
@@ -49,6 +49,7 @@ endif
 
 inc_public = include_directories('include')
 
+subdir('third_party/alac')
 subdir('src/engine')
 subdir('src/library')
 subdir('src/theme')
