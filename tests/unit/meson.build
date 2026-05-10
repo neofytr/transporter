@@ -157,3 +157,17 @@ test('library_search',
   ],
   timeout : 60,
 )
+
+test_config_toml = executable(
+  'test_config_toml',
+  'config_toml.cpp',
+  dependencies : [config_dep],
+)
+test('config_toml', test_config_toml)
+
+test_gui_pipeline_render = executable(
+  'test_gui_pipeline_render',
+  'gui_pipeline_render.cpp',
+  dependencies : [gui_dep, engine_dep, imgui_dep],
+)
+test('gui_pipeline_render', test_gui_pipeline_render)

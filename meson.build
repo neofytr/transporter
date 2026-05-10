@@ -50,6 +50,8 @@ endif
 inc_public = include_directories('include')
 
 subdir('third_party/alac')
+subdir('third_party/imgui')
+subdir('third_party/tomlpp')
 subdir('src/engine')
 subdir('src/library')
 subdir('src/theme')
@@ -58,20 +60,12 @@ subdir('src/hotplug')
 subdir('src/config')
 subdir('src/gui')
 
-transporter_modules = [
-  engine_lib,
-  library_lib,
-  theme_lib,
-  dbus_lib,
-  config_lib,
-  gui_lib,
-]
-
 executable(
   'transporter',
   'src/main.cpp',
-  include_directories : inc_public,
-  link_with : transporter_modules,
+  include_directories : [inc_public, include_directories('src')],
+  dependencies : [gui_dep, engine_dep, library_dep, config_dep],
+  link_with : [theme_lib, dbus_lib],
   install : true,
 )
 
