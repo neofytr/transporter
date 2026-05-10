@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+build-*/
+out/
+*.o
+*.so
+*.a
+*.dylib
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+compile_commands.json
+
+# Meson
+meson-private/
+meson-info/
+meson-logs/
+
+# Python (tooling scripts)
+__pycache__/
+*.pyc
+
+# Vendored deps build artifacts
+third_party/*/build/
+
+# Local config
+.envrc
+.env
