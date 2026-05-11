@@ -134,6 +134,10 @@ public:
 
     void set_delta_callback(DeltaCallback cb);
 
+    // Update watched roots and/or ignore patterns; effective on next rescan.
+    void set_roots(std::vector<std::filesystem::path> roots);
+    void set_ignore_patterns(std::vector<std::string> patterns);
+
     void rescan_async();
 
     ScanProgress progress() const;

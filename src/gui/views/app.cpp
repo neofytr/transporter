@@ -676,11 +676,13 @@ void open_dbus_service(AppState& st) {
         if (!r) {
             return false;
         }
-        // Hot-reload: library roots + dbus enabled + theme override path. The
-        // device, audio policy, and dbus.enabled toggle are not hot.
+        // Hot-reload: library roots, ignore patterns, and theme override path.
+        // Device, audio policy, and dbus.enabled are not hot.
         st.cfg.library = r->library;
         st.cfg.theme = r->theme;
         if (st.library_ != nullptr) {
+            st.library_->set_roots(r->library.roots);
+            st.library_->set_ignore_patterns(r->library.ignore_patterns);
             st.library_->rescan_async();
         }
         return true;

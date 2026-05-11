@@ -195,6 +195,18 @@ void Library::set_delta_callback(DeltaCallback cb) {
     impl_->delta_cb = std::move(cb);
 }
 
+void Library::set_roots(std::vector<std::filesystem::path> roots) {
+    if (impl_->scanner) {
+        impl_->scanner->set_roots(std::move(roots));
+    }
+}
+
+void Library::set_ignore_patterns(std::vector<std::string> patterns) {
+    if (impl_->scanner) {
+        impl_->scanner->set_ignore_patterns(std::move(patterns));
+    }
+}
+
 void Library::rescan_async() {
     if (impl_->scanner) {
         impl_->scanner->request_scan();

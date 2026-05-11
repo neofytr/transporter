@@ -37,6 +37,11 @@ public:
     // Wake the scanner thread to perform a full scan + sweep.
     void request_scan();
 
+    // Replace watched roots and/or ignore patterns; takes effect on the next
+    // scan (not the current one if one is in progress).
+    void set_roots(std::vector<std::filesystem::path> roots);
+    void set_ignore_patterns(std::vector<std::string> patterns);
+
     ScanProgress progress() const;
 
     void set_callback(DeltaCallback cb);
@@ -56,8 +61,14 @@ private:
     void set_current_path(const std::filesystem::path& p);
 
     std::filesystem::path db_path_;
+    mutable std::mutex roots_mu_;
     std::vector<std::filesystem::path> roots_;
     std::vector<std::string> ignore_patterns_;
+
+    // Per-scan snapshots; written at the top of run_one_scan (scanner thread
+    // only) and read throughout the same scan via walk_root / path_ignored.
+    std::vector<std::filesystem::path> scan_roots_;
+    std::vector<std::string>           scan_patterns_;
 
     mutable std::mutex cb_mu_;
     DeltaCallback cb_;

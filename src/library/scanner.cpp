@@ -198,9 +198,19 @@ void Scanner::emit(DeltaEvent::Kind k, std::int64_t id, const fs::path& p) {
     }
 }
 
+void Scanner::set_roots(std::vector<fs::path> roots) {
+    std::lock_guard<std::mutex> lk(roots_mu_);
+    roots_ = std::move(roots);
+}
+
+void Scanner::set_ignore_patterns(std::vector<std::string> patterns) {
+    std::lock_guard<std::mutex> lk(roots_mu_);
+    ignore_patterns_ = std::move(patterns);
+}
+
 bool Scanner::path_ignored(const fs::path& p) const {
     const std::string s = p.string();
-    for (const auto& glob : ignore_patterns_) {
+    for (const auto& glob : scan_patterns_) {
         if (::fnmatch(glob.c_str(), s.c_str(), 0) == 0) {
             return true;
         }
@@ -239,6 +249,14 @@ void Scanner::thread_main() {
 }
 
 void Scanner::run_one_scan(Db& db) {
+    // Snapshot roots and patterns so concurrent set_roots() / set_ignore_patterns()
+    // calls take effect on the next scan, not this one.
+    {
+        std::lock_guard<std::mutex> lk(roots_mu_);
+        scan_roots_    = roots_;
+        scan_patterns_ = ignore_patterns_;
+    }
+
     {
         std::lock_guard<std::mutex> lk(progress_mu_);
         state_ = ScanState::Scanning;
@@ -254,7 +272,7 @@ void Scanner::run_one_scan(Db& db) {
     std::vector<fs::path> live_paths;
     live_paths.reserve(1024);
 
-    for (const auto& root : roots_) {
+    for (const auto& root : scan_roots_) {
         if (cancel_requested_.load(std::memory_order_acquire)) {
             break;
         }
