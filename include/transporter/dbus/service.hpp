@@ -80,6 +80,7 @@ public:
     void notify_shuffle_changed();
     void notify_loop_status_changed();
     void notify_volume_changed();
+    void notify_seeked(std::int64_t position_us);
 
     // Invoke from the controlling object when an externally-driven Quit
     // happens (Ctrl-C, GUI close, etc.) so the service stops emitting before

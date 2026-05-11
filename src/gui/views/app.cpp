@@ -765,6 +765,11 @@ void handle_view_shortcuts(AppState& st) {
                     std::min(fw + 5 * static_cast<std::uint64_t>(snap.source.sample_rate_hz),
                              snap.source.total_frames);
                 (void)st.engine_->seek(target);
+                if (st.dbus_) {
+                    const auto pos_us = static_cast<std::int64_t>(
+                        (target * 1'000'000ULL) / snap.source.sample_rate_hz);
+                    st.dbus_->notify_seeked(pos_us);
+                }
             }
         }
     }
@@ -778,7 +783,13 @@ void handle_view_shortcuts(AppState& st) {
                 const std::uint64_t fw = snap.output.frames_written
                                        - snap.output.frames_written_at_track_start;
                 const std::uint64_t back = 5 * static_cast<std::uint64_t>(snap.source.sample_rate_hz);
-                (void)st.engine_->seek(fw > back ? fw - back : 0);
+                const std::uint64_t target = fw > back ? fw - back : 0;
+                (void)st.engine_->seek(target);
+                if (st.dbus_) {
+                    const auto pos_us = static_cast<std::int64_t>(
+                        (target * 1'000'000ULL) / snap.source.sample_rate_hz);
+                    st.dbus_->notify_seeked(pos_us);
+                }
             }
         }
     }

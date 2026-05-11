@@ -68,6 +68,7 @@ public:
     void notify_shuffle();
     void notify_loop_status();
     void notify_volume();
+    void notify_seeked(std::int64_t position_us);
 
 private:
     void register_vtable();

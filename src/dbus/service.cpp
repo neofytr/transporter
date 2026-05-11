@@ -121,6 +121,12 @@ void DbusService::notify_volume_changed() {
     }
 }
 
+void DbusService::notify_seeked(std::int64_t position_us) {
+    if (impl_ && impl_->player) {
+        impl_->player->notify_seeked(position_us);
+    }
+}
+
 void DbusService::Impl::poll_loop() {
     using namespace std::chrono_literals;
     while (!stop_flag.load(std::memory_order_acquire)) {

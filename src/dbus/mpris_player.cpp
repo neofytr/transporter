@@ -179,6 +179,14 @@ void MprisPlayer::notify_volume() {
     } catch (const sdbus::Error&) {}
 }
 
+void MprisPlayer::notify_seeked(std::int64_t position_us) {
+    try {
+        obj_.emitSignal(sdbus::SignalName{"Seeked"})
+            .onInterface(sdbus::InterfaceName{kIface})
+            .withArguments(position_us);
+    } catch (const sdbus::Error&) {}
+}
+
 void MprisPlayer::register_vtable() {
     auto post_play = [this] {
         if (engine_) {
