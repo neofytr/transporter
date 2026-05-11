@@ -538,6 +538,10 @@ void wire_engine_events(AppState& st) {
             // Gapless swap already happened in the decoder thread if formats
             // matched; TrackEnded fires only on format mismatch or when no
             // preload was staged — advance queue and reload normally.
+            {
+                std::lock_guard lk(st.queue_mtx);
+                st.pending_preload_path.clear();
+            }
             if (auto next = st.queue_next(); next) {
                 if (st.engine_->load(*next)) {
                     (void)st.engine_->play();
