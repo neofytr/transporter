@@ -224,7 +224,8 @@ void draw_library_view(AppState& st) {
                     st.selected_album_id = 0;
                 }
                 ImGui::SameLine();
-                ImGui::TextColored(kMuted, "(%lld)",
+                ImGui::TextColored(kMuted, "(%lld alb · %lld)",
+                                   static_cast<long long>(art.album_count),
                                    static_cast<long long>(art.track_count));
             }
         } else {
