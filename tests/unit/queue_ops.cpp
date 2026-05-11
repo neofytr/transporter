@@ -211,3 +211,42 @@ TEST_CASE("queue_move: swapping last two elements updates current") {
     CHECK(st.queue[2].string() == "/b");
     CHECK(st.queue_index == 1); // c is now at index 1
 }
+
+TEST_CASE("queue_append: appends to end, does not move current index") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b"}, 0); // a is current
+    st.queue_append("/c");
+    REQUIRE(st.queue.size() == 3);
+    CHECK(st.queue[2].string() == "/c");
+    CHECK(st.queue_index == 0); // current unchanged
+}
+
+TEST_CASE("queue_insert_next: inserts after current, adjusts nothing for current") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 1); // b is current
+    st.queue_insert_next("/x");
+    REQUIRE(st.queue.size() == 4);
+    CHECK(st.queue[0].string() == "/a");
+    CHECK(st.queue[1].string() == "/b");
+    CHECK(st.queue[2].string() == "/x"); // inserted right after current
+    CHECK(st.queue[3].string() == "/c");
+    CHECK(st.queue_index == 1); // current unchanged
+}
+
+TEST_CASE("queue_insert_next: empty queue appends without changing index") {
+    transporter::gui::AppState st;
+    // queue_index = -1 → ins = 0 → guard (ins <= 0) triggers → appends
+    st.queue_insert_next("/a");
+    REQUIRE(st.queue.size() == 1);
+    CHECK(st.queue[0].string() == "/a");
+    CHECK(st.queue_index == -1); // index not managed by insert_next
+}
+
+TEST_CASE("queue_insert_next: inserting after last element appends") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b"}, 1); // b is last and current
+    st.queue_insert_next("/c");
+    REQUIRE(st.queue.size() == 3);
+    CHECK(st.queue[2].string() == "/c");
+    CHECK(st.queue_index == 1); // current unchanged
+}
