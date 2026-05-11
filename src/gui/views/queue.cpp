@@ -133,14 +133,10 @@ void draw_queue_view(AppState& st) {
         ImGui::SameLine();
         constexpr float kRemoveW = 24.0f;
         if (row_dur.count() > 0) {
-            const long long total_s = row_dur.count() / 1000;
-            char dur[20];
-            std::snprintf(dur, sizeof(dur), "%lld:%02lld",
-                          static_cast<long long>(total_s / 60),
-                          static_cast<long long>(total_s % 60));
-            const float dur_w = ImGui::CalcTextSize(dur).x + 8.0f;
+            const std::string dur = format_duration(row_dur);
+            const float dur_w = ImGui::CalcTextSize(dur.c_str()).x + 8.0f;
             ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - kRemoveW - dur_w);
-            ImGui::TextColored(kMuted, "%s", dur);
+            ImGui::TextColored(kMuted, "%s", dur.c_str());
             ImGui::SameLine();
         }
         ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - kRemoveW);
