@@ -84,7 +84,6 @@ struct AppState {
     std::string library_query;
     std::string selected_artist;
     std::int64_t selected_album_id = 0;
-    std::string library_status;       // e.g. "scanning... 234 / 1024"
 
     // Engine event log (kept short, ~64 entries)
     std::mutex log_mtx;

@@ -371,26 +371,20 @@ void draw_library_view(AppState& st) {
 
     // Status line
     ImGui::Separator();
-    if (!st.library_status.empty()) {
-        int done = 0, total = 0;
-        if (std::sscanf(st.library_status.c_str(), "scanning... %d / %d", &done, &total) == 2
-                && total > 0) {
-            const float frac = std::clamp(static_cast<float>(done) / static_cast<float>(total),
-                                          0.0f, 1.0f);
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 6.0f), "");
-            ImGui::TextColored(kMuted, "%d / %d tracks indexed", done, total);
-        } else {
-            ImGui::TextColored(kMuted, "%s", st.library_status.c_str());
-        }
-    } else {
+    {
         const auto p = st.library_->progress();
-        char buf2[128];
-        std::snprintf(buf2, sizeof(buf2),
-                      "%s... seen=%zu indexed=%zu deleted=%zu",
-                      scan_state_name(p.state), p.files_seen,
-                      p.files_indexed, p.files_deleted);
-        ImGui::TextColored(kMuted, "%s", buf2);
+        if (p.state == library::ScanState::Idle) {
+            ImGui::TextColored(kMuted, "idle  %zu tracks", p.files_indexed);
+        } else {
+            char buf2[256];
+            const char* fn = p.current_path.empty()
+                ? ""
+                : p.current_path.filename().c_str();
+            std::snprintf(buf2, sizeof(buf2), "%s  %zu seen  %zu indexed  %s",
+                          scan_state_name(p.state),
+                          p.files_seen, p.files_indexed, fn);
+            ImGui::TextColored(kMuted, "%s", buf2);
+        }
     }
 
     ImGui::SameLine();
