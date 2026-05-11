@@ -1074,6 +1074,7 @@ int run(const AppArgs& args) {
                 st.dbus_.reset();
             }
             if (st.engine_) {
+                st.engine_->set_event_callback({});
                 st.engine_->stop();
                 st.engine_.reset();
             }
