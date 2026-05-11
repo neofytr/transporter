@@ -29,16 +29,17 @@ Lyrics load_lyrics(const std::filesystem::path& audio_path) {
     std::string line;
     while (std::getline(f, line)) {
         int mm = 0, ss = 0, cs = 0;
-        if (std::sscanf(line.c_str(), "[%d:%d.%d]", &mm, &ss, &cs) != 3)
-            continue;
+        // Metadata tags like [ti:...] fail both sscanf variants because
+        // the first field is not a decimal integer — no extra filter needed.
+        if (std::sscanf(line.c_str(), "[%d:%d.%d]", &mm, &ss, &cs) != 3) {
+            cs = 0;
+            if (std::sscanf(line.c_str(), "[%d:%d]", &mm, &ss) != 2)
+                continue;
+        }
 
-        // Advance past the tag to the lyric text.
         const auto close = line.find(']');
         if (close == std::string::npos) continue;
         std::string text = line.substr(close + 1);
-
-        // Skip metadata tags — their text contains ':' (e.g. "ti:", "ar:").
-        if (text.find(':') != std::string::npos) continue;
 
         out.lines.push_back({
             static_cast<std::int64_t>((mm * 60 + ss) * 1000 + cs * 10),
