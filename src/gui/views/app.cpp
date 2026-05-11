@@ -1269,6 +1269,13 @@ int run(const AppArgs& args) {
         }
     }
 
+    // Detach the event callback before AppState members start tearing down.
+    // The decoder thread may fire events during engine destruction; without
+    // this the callback would access already-destroyed AppState members.
+    if (st.engine_) {
+        st.engine_->set_event_callback({});
+    }
+
     backend_thread.join();
     return 0;
 }
