@@ -290,7 +290,7 @@ void AppState::refresh_preload() {
     auto peek = queue_peek_next();
     {
         std::lock_guard lk(queue_mtx);
-        pending_preload_path = peek ? peek->string() : std::string{};
+        pending_preload_path = peek ? *peek : std::filesystem::path{};
     }
     if (peek) {
         (void)engine_->preload(*peek);
