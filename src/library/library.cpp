@@ -167,7 +167,7 @@ Library::open(Config cfg) {
         }
     }
 
-    auto read_db = Db::open(cfg.db_path, false);
+    auto read_db = Db::open(cfg.db_path, true);
     if (!read_db) {
         return std::unexpected(read_db.error());
     }
