@@ -104,6 +104,9 @@ void draw_queue_view(AppState& st) {
         if (ImGui::Selectable(label, current)) {
             st.queue_jump_to(i);
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", path.c_str());
+        }
 
         if (ImGui::BeginPopupContextItem()) {
             if (ImGui::MenuItem("Play now")) {
