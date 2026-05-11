@@ -633,7 +633,12 @@ void draw_tab_bar(AppState& st) {
         ImGui::SameLine();
     };
     tab("Main (F1)", ViewId::Main);
-    tab("Library (F2)", ViewId::Library);
+    // Show a simple scan-in-progress suffix when the library is active.
+    {
+        const bool scanning = st.library_ != nullptr &&
+            st.library_->progress().state != library::ScanState::Idle;
+        tab(scanning ? "Library* (F2)" : "Library (F2)", ViewId::Library);
+    }
     tab("Pipeline (F3)", ViewId::Pipeline);
     tab("Queue (F4)", ViewId::Queue);
     ImGui::NewLine();
