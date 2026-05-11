@@ -386,8 +386,12 @@ void wire_engine_events(AppState& st) {
             st.push_toast(ev.error.message);
             break;
         case engine::Event::Kind::DeviceLost:
+            std::snprintf(line, sizeof(line), "%s", event_kind_name(ev.kind));
+            st.push_toast("DAC disconnected — waiting for reconnection", 10.0f);
+            break;
         case engine::Event::Kind::DeviceReturn:
             std::snprintf(line, sizeof(line), "%s", event_kind_name(ev.kind));
+            st.push_toast("DAC reconnected", 3.0f);
             break;
         }
         st.push_log(std::string{line});

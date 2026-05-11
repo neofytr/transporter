@@ -263,6 +263,30 @@ void draw_main_view(AppState& st) {
         return;
     }
 
+    // Persistent banner for transient non-playing states.
+    {
+        const auto eng_state = st.last_engine_state.load(std::memory_order_relaxed);
+        if (eng_state == engine::State::Disconnected) {
+            constexpr ImVec4 kWarnBg{0.45f, 0.25f, 0.05f, 1.0f};
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, kWarnBg);
+            ImGui::BeginChild("##disc_banner", ImVec2(-FLT_MIN, 22),
+                              ImGuiChildFlags_None);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
+            ImGui::Text("  DAC disconnected — reconnect to resume");
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        } else if (eng_state == engine::State::Error) {
+            constexpr ImVec4 kErrBg{0.45f, 0.05f, 0.05f, 1.0f};
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, kErrBg);
+            ImGui::BeginChild("##err_banner", ImVec2(-FLT_MIN, 22),
+                              ImGuiChildFlags_None);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
+            ImGui::Text("  engine error — see event log");
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        }
+    }
+
     // Track block
     ImGui::PushFont(nullptr);
     if (!snap.source.tags.title.empty()) {
