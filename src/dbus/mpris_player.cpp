@@ -17,8 +17,8 @@
 // Properties:
 //   PlaybackStatus, Metadata, Position, Volume, Rate, MinimumRate,
 //   MaximumRate, Shuffle, LoopStatus, CanGoNext, CanGoPrevious, CanPlay,
-//   CanPause, CanSeek, CanControl. Volume is exposed as 1.0 read-only for
-//   Phase 10; Phase 12 wires the real volume work.
+//   CanPause, CanSeek, CanControl. Volume maps to the ALSA hardware mixer
+//   when available; falls back to 1.0 read-only when no mixer control exists.
 //
 // Threading: getters and method handlers fire on the DBus event-loop thread.
 // They read engine::State / pipeline_snapshot() (both lock-free or briefly
@@ -28,6 +28,7 @@
 #include "mpris_player.hpp"
 #include "mpris_metadata.hpp"
 
+#include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/telemetry.hpp>
 
@@ -284,7 +285,29 @@ void MprisPlayer::register_vtable() {
             }
             return metadata_;
         }),
-        sdbus::registerProperty("Volume").withGetter([] { return 1.0; }),
+        sdbus::registerProperty("Volume")
+            .withGetter([this] {
+                if (engine_ == nullptr) {
+                    return 1.0;
+                }
+                const auto& hw = engine_->pipeline_snapshot().device.current_hw_string;
+                if (hw.empty()) {
+                    return 1.0;
+                }
+                const int pct = transporter::engine::get_hw_volume_pct(hw);
+                return pct >= 0 ? static_cast<double>(pct) / 100.0 : 1.0;
+            })
+            .withSetter([this](double v) {
+                if (engine_ == nullptr) {
+                    return;
+                }
+                const auto& hw = engine_->pipeline_snapshot().device.current_hw_string;
+                if (hw.empty()) {
+                    return;
+                }
+                const int pct = std::clamp(static_cast<int>(v * 100.0), 0, 100);
+                transporter::engine::set_hw_volume_pct(hw, pct);
+            }),
         sdbus::registerProperty("Position").withGetter([this] {
             if (engine_ == nullptr) {
                 return std::int64_t{0};
