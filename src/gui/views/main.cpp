@@ -124,12 +124,18 @@ void dac_combo(AppState& st) {
     if (ImGui::BeginCombo("##dac", preview_buf.c_str())) {
         for (const auto& d : st.devices) {
             const bool selected = (d.alsa_hw_string == st.preferred_device);
+            const bool busy = d.caps.caps_probe_failed;
             std::string label = d.fingerprint.alsa_card_name + "  " +
                                 d.alsa_hw_string;
-            if (ImGui::Selectable(label.c_str(), selected)) {
+            if (busy) label += "  (busy)";
+            if (ImGui::Selectable(label.c_str(), selected,
+                                  busy ? ImGuiSelectableFlags_Disabled : 0)) {
                 if (d.alsa_hw_string != st.preferred_device) {
                     st.pending_device_switch = d.alsa_hw_string;
                 }
+            }
+            if (busy && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("%s", d.caps.probe_failure_reason.c_str());
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
