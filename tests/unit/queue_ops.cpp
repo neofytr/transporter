@@ -101,3 +101,41 @@ TEST_CASE("queue_remove: adjusts index for slot removed before current") {
     CHECK(st.queue[1].string() == "/c");
     CHECK(st.queue_index == 1); // c shifted left
 }
+
+TEST_CASE("queue_remove: removing current clamps index to previous") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 1); // b is current
+    st.queue_remove(1);               // remove b (current)
+    REQUIRE(st.queue.size() == 2);
+    CHECK(st.queue[0].string() == "/a");
+    CHECK(st.queue[1].string() == "/c");
+    CHECK(st.queue_index == 0); // clamped to first remaining
+}
+
+TEST_CASE("queue_remove: removing current at index 0 advances to next") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 0); // a is current
+    st.queue_remove(0);               // remove a
+    REQUIRE(st.queue.size() == 2);
+    CHECK(st.queue[0].string() == "/b");
+    CHECK(st.queue_index == 0); // clamped to 0; b is now current
+}
+
+TEST_CASE("queue_remove: last track results in empty queue") {
+    transporter::gui::AppState st;
+    fill(st, {"/a"}, 0);
+    st.queue_remove(0);
+    CHECK(st.queue.empty());
+    CHECK(st.queue_index == -1);
+}
+
+TEST_CASE("queue_move: swapping last two elements updates current") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 2); // c is current
+    st.queue_move(2, 1);              // swap c up
+    REQUIRE(st.queue.size() == 3);
+    CHECK(st.queue[0].string() == "/a");
+    CHECK(st.queue[1].string() == "/c");
+    CHECK(st.queue[2].string() == "/b");
+    CHECK(st.queue_index == 1); // c is now at index 1
+}
