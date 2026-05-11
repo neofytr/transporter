@@ -357,13 +357,12 @@ void draw_main_view(AppState& st) {
 
     // Time / progress
     const std::int64_t total_ms = snap.source.duration.count();
-    std::int64_t elapsed_ms = 0;
-    if (snap.source.sample_rate_hz > 0) {
-        const std::uint64_t track_frames =
-            snap.output.frames_written - snap.output.frames_written_at_track_start;
-        elapsed_ms = static_cast<std::int64_t>(
-            (track_frames * 1000ull) / snap.source.sample_rate_hz);
-    }
+    const std::int64_t track_frames =
+        static_cast<std::int64_t>(snap.output.frames_written) -
+        static_cast<std::int64_t>(snap.output.frames_written_at_track_start);
+    const std::int64_t elapsed_ms = snap.source.sample_rate_hz > 0
+        ? (track_frames * 1000LL) / static_cast<std::int64_t>(snap.source.sample_rate_hz)
+        : 0;
     char tbuf[24], dbuf[24];
     format_time(elapsed_ms, tbuf, sizeof(tbuf));
     format_time(total_ms, dbuf, sizeof(dbuf));
