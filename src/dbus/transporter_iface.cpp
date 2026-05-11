@@ -19,6 +19,7 @@
 //       "duration_ms":       x    int64 milliseconds
 //       "title":             s
 //       "artist":            s
+//       "album_artist":      s
 //       "album":             s
 //       "track_no":          s
 //       "date":              s
@@ -49,6 +50,7 @@
 //       "buffer_size_frames":    u
 //       "hw_format":             s   "S24_LE@96000x2"
 //       "frames_written":        t
+//       "frames_written_at_track_start": t
 //       "xrun_count":            u
 //   }
 //   "device"        -> {

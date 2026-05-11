@@ -117,6 +117,7 @@ snapshot_to_dict(const transporter::engine::PipelineSnapshot& snap) {
                       snap.source.duration.count())});
         m.emplace("title", sdbus::Variant{snap.source.tags.title});
         m.emplace("artist", sdbus::Variant{snap.source.tags.artist});
+        m.emplace("album_artist", sdbus::Variant{snap.source.tags.album_artist});
         m.emplace("album", sdbus::Variant{snap.source.tags.album});
         m.emplace("track_no", sdbus::Variant{snap.source.tags.track_no});
         m.emplace("date", sdbus::Variant{snap.source.tags.date});
@@ -186,6 +187,8 @@ snapshot_to_dict(const transporter::engine::PipelineSnapshot& snap) {
                   sdbus::Variant{format_pcm(snap.output.hw_params_set)});
         m.emplace("frames_written",
                   sdbus::Variant{snap.output.frames_written});
+        m.emplace("frames_written_at_track_start",
+                  sdbus::Variant{snap.output.frames_written_at_track_start});
         m.emplace("xrun_count",
                   sdbus::Variant{snap.output.xrun_count});
         out.emplace("output", std::move(m));
