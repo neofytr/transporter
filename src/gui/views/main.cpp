@@ -376,6 +376,11 @@ void draw_main_view(AppState& st) {
         const auto target = static_cast<std::uint64_t>(
             frac * static_cast<float>(snap.source.total_frames));
         (void)st.engine_->seek(target);
+        if (st.dbus_ && snap.source.sample_rate_hz > 0) {
+            const auto pos_us = static_cast<std::int64_t>(
+                (target * 1'000'000ULL) / snap.source.sample_rate_hz);
+            st.dbus_->notify_seeked(pos_us);
+        }
     }
     if (ImGui::IsItemHovered() && total_ms > 0) {
         const float hover_frac = (ImGui::GetMousePos().x - ImGui::GetItemRectMin().x) /
