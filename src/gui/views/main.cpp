@@ -689,6 +689,14 @@ void draw_mini_view(AppState& st) {
         ImGui::SameLine();
         verdict_badge(snap);
     }
+
+    // Thin progress strip
+    if (total_ms > 0) {
+        const float frac = std::clamp(
+            static_cast<float>(elapsed_ms < 0 ? 0 : elapsed_ms) / static_cast<float>(total_ms),
+            0.0f, 1.0f);
+        ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 3.0f), "");
+    }
 }
 
 } // namespace transporter::gui
