@@ -49,8 +49,16 @@ void draw_queue_view(AppState& st) {
         row_info = st.queue_row_info;
     }
 
-    // Header: count, total duration (if known), clear button
-    if (snap_duration.count() > 0) {
+    // Header: count + optional current position + total duration
+    const bool has_pos = (snap_index >= 0 &&
+                          snap_index < static_cast<std::int32_t>(snap_queue.size()));
+    if (has_pos && snap_duration.count() > 0) {
+        ImGui::Text("%d of %zu  \xc2\xb7  %s",
+                    snap_index + 1, snap_queue.size(),
+                    format_duration(snap_duration).c_str());
+    } else if (has_pos) {
+        ImGui::Text("%d of %zu", snap_index + 1, snap_queue.size());
+    } else if (snap_duration.count() > 0) {
         ImGui::Text("%zu track%s  \xc2\xb7  %s",
                     snap_queue.size(),
                     snap_queue.size() == 1 ? "" : "s",
