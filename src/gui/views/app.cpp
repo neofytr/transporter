@@ -1282,21 +1282,28 @@ int run(const AppArgs& args) {
             fs::create_directories(dir, ec);
             if (!ec) {
                 if (std::ofstream f{dir / "session"}; f) {
-                    f << "shuffle=" << (st.shuffle ? "1" : "0") << '\n';
+                    // Snapshot all queue-protected state under one lock so
+                    // the saved values are mutually consistent.
+                    bool saved_shuffle;
                     int rm = 0;
-                    switch (st.repeat_mode) {
-                    case AppState::RepeatMode::None: rm = 0; break;
-                    case AppState::RepeatMode::One:  rm = 1; break;
-                    case AppState::RepeatMode::All:  rm = 2; break;
-                    }
-                    f << "repeat=" << rm << '\n';
-                    // Persist the play queue so it can be resumed on next launch.
+                    std::int32_t saved_index;
+                    std::vector<std::filesystem::path> saved_queue;
                     {
                         std::lock_guard lk(st.queue_mtx);
-                        f << "queue_index=" << st.queue_index << '\n';
-                        for (const auto& p : st.queue)
-                            f << "queue=" << p.string() << '\n';
+                        saved_shuffle = st.shuffle;
+                        switch (st.repeat_mode) {
+                        case AppState::RepeatMode::None: rm = 0; break;
+                        case AppState::RepeatMode::One:  rm = 1; break;
+                        case AppState::RepeatMode::All:  rm = 2; break;
+                        }
+                        saved_index = st.queue_index;
+                        saved_queue = st.queue;
                     }
+                    f << "shuffle=" << (saved_shuffle ? "1" : "0") << '\n';
+                    f << "repeat=" << rm << '\n';
+                    f << "queue_index=" << saved_index << '\n';
+                    for (const auto& p : saved_queue)
+                        f << "queue=" << p.string() << '\n';
                 }
             }
         }
