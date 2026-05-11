@@ -62,7 +62,7 @@ struct AppState {
     // In-process queue. Phase 10 keeps it minimal: command-line file lands
     // here on launch, OpenUri appends, MPRIS Next/Previous walks it. Index
     // is the currently-loaded slot (or -1 when empty).
-    std::mutex queue_mtx;
+    mutable std::mutex queue_mtx;
     std::vector<std::filesystem::path> queue;
     std::int32_t queue_index = -1;
     std::chrono::milliseconds queue_total_duration{0};
@@ -86,7 +86,7 @@ struct AppState {
     std::int64_t selected_album_id = 0;
 
     // Engine event log (kept short, ~64 entries)
-    std::mutex log_mtx;
+    mutable std::mutex log_mtx;
     std::deque<LogEntry> log;
     std::atomic<engine::State> last_engine_state{engine::State::Idle};
 

@@ -125,7 +125,7 @@ void AppState::push_log(std::string text) {
 }
 
 std::vector<LogEntry> AppState::snapshot_log(std::size_t max) const {
-    std::lock_guard lk(const_cast<std::mutex&>(log_mtx));
+    std::lock_guard lk(log_mtx);
     std::vector<LogEntry> out;
     const std::size_t take = std::min(max, log.size());
     out.reserve(take);
@@ -200,7 +200,7 @@ void AppState::queue_set_single(std::filesystem::path p) {
 }
 
 std::optional<std::filesystem::path> AppState::queue_peek_next() const {
-    std::lock_guard lk(const_cast<std::mutex&>(queue_mtx));
+    std::lock_guard lk(queue_mtx);
     if (queue.empty() || queue_index < 0) {
         return std::nullopt;
     }
