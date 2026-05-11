@@ -609,6 +609,29 @@ int run(const AppArgs& args) {
         st.queue_set_single(st.queued_file);
     }
 
+    // Restore session state from previous run
+    {
+        const char* home = std::getenv("HOME");
+        if (home) {
+            namespace fs = std::filesystem;
+            const fs::path sf =
+                fs::path{home} / ".cache" / "transporter" / "session";
+            if (std::ifstream f{sf}; f) {
+                std::string line;
+                while (std::getline(f, line)) {
+                    if (line.starts_with("shuffle="))
+                        st.shuffle = (line.back() == '1');
+                    else if (line.starts_with("repeat=")) {
+                        const char c = line.back();
+                        if (c == '1') st.repeat_mode = AppState::RepeatMode::One;
+                        else if (c == '2') st.repeat_mode = AppState::RepeatMode::All;
+                        else st.repeat_mode = AppState::RepeatMode::None;
+                    }
+                }
+            }
+        }
+    }
+
     auto win_or = platform::Window::create(platform::WindowConfig{});
     if (!win_or) {
         std::fprintf(stderr, "transporter: %s\n",
@@ -838,6 +861,29 @@ int run(const AppArgs& args) {
                 if (std::ofstream f{dir / "geometry"}; f) {
                     f << win.framebuffer_width() << ' '
                       << win.framebuffer_height() << '\n';
+                }
+            }
+        }
+    }
+
+    // Save session state for next launch
+    {
+        const char* home = std::getenv("HOME");
+        if (home) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path dir = fs::path{home} / ".cache" / "transporter";
+            fs::create_directories(dir, ec);
+            if (!ec) {
+                if (std::ofstream f{dir / "session"}; f) {
+                    f << "shuffle=" << (st.shuffle ? "1" : "0") << '\n';
+                    int rm = 0;
+                    switch (st.repeat_mode) {
+                    case AppState::RepeatMode::None: rm = 0; break;
+                    case AppState::RepeatMode::One:  rm = 1; break;
+                    case AppState::RepeatMode::All:  rm = 2; break;
+                    }
+                    f << "repeat=" << rm << '\n';
                 }
             }
         }
