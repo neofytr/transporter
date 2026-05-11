@@ -196,11 +196,17 @@ void AppState::queue_set_single(std::filesystem::path p) {
 
 std::optional<std::filesystem::path> AppState::queue_peek_next() const {
     std::lock_guard lk(const_cast<std::mutex&>(queue_mtx));
-    if (queue.empty()) {
+    if (queue.empty() || queue_index < 0) {
         return std::nullopt;
     }
+    if (repeat_mode == RepeatMode::One) {
+        return queue[static_cast<std::size_t>(queue_index)];
+    }
     const std::int32_t next = queue_index + 1;
-    if (next < 0 || next >= static_cast<std::int32_t>(queue.size())) {
+    if (next >= static_cast<std::int32_t>(queue.size())) {
+        if (repeat_mode == RepeatMode::All) {
+            return queue[0];
+        }
         return std::nullopt;
     }
     return queue[static_cast<std::size_t>(next)];

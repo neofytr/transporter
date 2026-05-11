@@ -129,6 +129,24 @@ TEST_CASE("queue_remove: last track results in empty queue") {
     CHECK(st.queue_index == -1);
 }
 
+TEST_CASE("queue_peek_next: repeat-one returns current track") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 1); // b is current
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::One;
+    const auto p = st.queue_peek_next();
+    REQUIRE(p.has_value());
+    CHECK(p->string() == "/b");
+}
+
+TEST_CASE("queue_peek_next: repeat-all wraps at end") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 2); // c is current (last)
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::All;
+    const auto p = st.queue_peek_next();
+    REQUIRE(p.has_value());
+    CHECK(p->string() == "/a"); // wraps to first
+}
+
 TEST_CASE("queue_move: swapping last two elements updates current") {
     transporter::gui::AppState st;
     fill(st, {"/a", "/b", "/c"}, 2); // c is current
