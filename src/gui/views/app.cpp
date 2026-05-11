@@ -1127,13 +1127,26 @@ int run_headless(const AppArgs& args) {
         return 4;
     }
 
+    std::vector<std::filesystem::path> playlist;
+    bool use_playlist = is_playlist_ext(args.file_to_play);
+    if (use_playlist) {
+        playlist = transporter::gui::load_playlist(args.file_to_play);
+        if (playlist.empty()) {
+            std::fprintf(stderr, "transporter: empty or unreadable playlist: %s\n",
+                         args.file_to_play.c_str());
+            return 1;
+        }
+    }
+
     std::mutex mtx;
     std::condition_variable cv;
-    bool done = false;
+    std::atomic<bool> done{false};
+    std::atomic<int> playlist_pos{0};
     int exit_code = 0;
     st.engine_->set_event_callback([&](const engine::Event& ev) {
         switch (ev.kind) {
         case engine::Event::Kind::TrackLoaded:
+            std::printf("playing: %s\n", ev.file_path.c_str());
             std::printf("loaded rate=%u ch=%u total=%llu\n",
                         ev.format.sample_rate_hz, ev.format.channels,
                         static_cast<unsigned long long>(ev.total_frames));
@@ -1143,22 +1156,34 @@ int run_headless(const AppArgs& args) {
             break;
         case engine::Event::Kind::TrackEnded:
             std::printf("ended\n");
-            { std::lock_guard lk(mtx); done = true; }
-            cv.notify_all();
+            if (use_playlist) {
+                const int next = playlist_pos.fetch_add(1) + 1;
+                if (next < static_cast<int>(playlist.size())) {
+                    (void)st.engine_->load(playlist[next]);
+                    (void)st.engine_->play();
+                } else {
+                    done.store(true);
+                    cv.notify_all();
+                }
+            } else {
+                done.store(true);
+                cv.notify_all();
+            }
             break;
         case engine::Event::Kind::ErrorOccurred:
             std::fprintf(stderr, "error [%s] %s\n",
                          std::string(engine::error_code_name(ev.error.code)).c_str(),
                          ev.error.message.c_str());
             exit_code = 5;
-            { std::lock_guard lk(mtx); done = true; }
+            done.store(true);
             cv.notify_all();
             break;
         default: break;
         }
     });
 
-    if (auto r = st.engine_->load(args.file_to_play); !r) {
+    const std::filesystem::path first = use_playlist ? playlist[0] : std::filesystem::path(args.file_to_play);
+    if (auto r = st.engine_->load(first); !r) {
         std::fprintf(stderr, "load failed: %s\n", r.error().message.c_str());
         return 6;
     }
@@ -1169,7 +1194,7 @@ int run_headless(const AppArgs& args) {
 
     {
         std::unique_lock lk(mtx);
-        cv.wait(lk, [&]{ return done; });
+        cv.wait(lk, [&]{ return done.load(); });
     }
     return exit_code;
 }
