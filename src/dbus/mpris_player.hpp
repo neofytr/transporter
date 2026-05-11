@@ -67,6 +67,7 @@ public:
     // (status bars, playerctl watchers) pick up GUI-driven changes promptly.
     void notify_shuffle();
     void notify_loop_status();
+    void notify_volume();
 
 private:
     void register_vtable();

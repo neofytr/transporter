@@ -115,6 +115,12 @@ void DbusService::notify_loop_status_changed() {
     }
 }
 
+void DbusService::notify_volume_changed() {
+    if (impl_ && impl_->player) {
+        impl_->player->notify_volume();
+    }
+}
+
 void DbusService::Impl::poll_loop() {
     using namespace std::chrono_literals;
     while (!stop_flag.load(std::memory_order_acquire)) {

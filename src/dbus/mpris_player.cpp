@@ -173,6 +173,12 @@ void MprisPlayer::notify_loop_status() {
     } catch (const sdbus::Error&) {}
 }
 
+void MprisPlayer::notify_volume() {
+    try {
+        obj_.emitPropertiesChangedSignal(kIface, {sdbus::PropertyName{"Volume"}});
+    } catch (const sdbus::Error&) {}
+}
+
 void MprisPlayer::register_vtable() {
     auto post_play = [this] {
         if (engine_) {

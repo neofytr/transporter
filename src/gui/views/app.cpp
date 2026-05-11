@@ -791,6 +791,7 @@ void handle_view_shortcuts(AppState& st) {
                 engine::set_hw_volume_pct(hw, pct);
                 st.hw_volume_pct = pct;
                 st.hw_volume_last_poll = {};
+                if (st.dbus_) { st.dbus_->notify_volume_changed(); }
             }
         }
     }
@@ -802,6 +803,7 @@ void handle_view_shortcuts(AppState& st) {
                 engine::set_hw_volume_pct(hw, pct);
                 st.hw_volume_pct = pct;
                 st.hw_volume_last_poll = {};
+                if (st.dbus_) { st.dbus_->notify_volume_changed(); }
             }
         }
     }

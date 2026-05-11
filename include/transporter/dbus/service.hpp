@@ -79,6 +79,7 @@ public:
     // GUI thread whenever the user toggles these via the UI controls.
     void notify_shuffle_changed();
     void notify_loop_status_changed();
+    void notify_volume_changed();
 
     // Invoke from the controlling object when an externally-driven Quit
     // happens (Ctrl-C, GUI close, etc.) so the service stops emitting before
