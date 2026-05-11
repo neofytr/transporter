@@ -409,4 +409,27 @@ Library::track_by_id(std::int64_t id) const {
     return std::unexpected(sqlite_error(*impl_->read_db, "track_by_id.step"));
 }
 
+std::expected<Track, transporter::engine::Error>
+Library::track_by_path(const std::filesystem::path& path) const {
+    std::lock_guard<std::mutex> lk(impl_->read_mu);
+
+    auto stmt_or = impl_->read_db->prepare(queries::select_full_track_by_path);
+    if (!stmt_or) {
+        return std::unexpected(stmt_or.error());
+    }
+    sqlite3_stmt* stmt = *stmt_or;
+    bind_text(stmt, 1, path.string());
+
+    const int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        return row_to_track(stmt);
+    }
+    if (rc == SQLITE_DONE) {
+        return std::unexpected(transporter::engine::Error{
+            transporter::engine::ErrorCode::NotFound,
+            "track not found"});
+    }
+    return std::unexpected(sqlite_error(*impl_->read_db, "track_by_path.step"));
+}
+
 } // namespace transporter::library

@@ -153,6 +153,9 @@ public:
     std::expected<Track, transporter::engine::Error>
     track_by_id(std::int64_t id) const;
 
+    std::expected<Track, transporter::engine::Error>
+    track_by_path(const std::filesystem::path& path) const;
+
 private:
     Library();
     struct Impl;

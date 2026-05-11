@@ -371,31 +371,28 @@ void AppState::recompute_queue_duration() {
     if (snap.empty()) {
         std::lock_guard lk(queue_mtx);
         queue_total_duration = std::chrono::milliseconds{0};
+        queue_row_info.clear();
         return;
     }
-    auto result = library_->search(library::SearchFilter{});
-    if (!result) {
-        return;
-    }
+    // Look up only the tracks in the queue by path (uses idx_tracks_path).
     std::unordered_map<std::string, QueueRowInfo> row_info;
-    row_info.reserve(result->size());
-    for (const auto& t : *result) {
-        QueueRowInfo ri;
-        ri.duration = t.duration;
-        if (!t.title.empty()) {
-            ri.label = t.title;
-            if (!t.artist.empty()) {
-                ri.label += "  \xe2\x80\x94  ";
-                ri.label += t.artist;
-            }
-        }
-        row_info.emplace(t.path.string(), std::move(ri));
-    }
+    row_info.reserve(snap.size());
     std::chrono::milliseconds total{0};
     for (const auto& p : snap) {
-        auto it = row_info.find(p.string());
-        if (it != row_info.end()) {
-            total += it->second.duration;
+        const std::string key = p.string();
+        if (row_info.count(key)) continue; // dedup repeated paths
+        if (auto t = library_->track_by_path(p); t) {
+            QueueRowInfo ri;
+            ri.duration = t->duration;
+            if (!t->title.empty()) {
+                ri.label = t->title;
+                if (!t->artist.empty()) {
+                    ri.label += "  \xe2\x80\x94  ";
+                    ri.label += t->artist;
+                }
+            }
+            total += t->duration;
+            row_info.emplace(key, std::move(ri));
         }
     }
     {

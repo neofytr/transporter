@@ -23,6 +23,11 @@ inline constexpr std::string_view select_track_by_id =
     "codec, sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
     "file_size, mtime_unix_ns FROM tracks WHERE id = ?1";
 
+inline constexpr std::string_view select_full_track_by_path =
+    "SELECT id, path, title, artist, album, album_artist, track_no, date, "
+    "codec, sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
+    "file_size, mtime_unix_ns FROM tracks WHERE path = ?1";
+
 inline constexpr std::string_view upsert_track =
     "INSERT INTO tracks "
     "(path, title, artist, album, album_artist, track_no, date, codec, "
