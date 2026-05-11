@@ -218,15 +218,38 @@ void draw_library_view(AppState& st) {
                           ImGuiChildFlags_Border);
         if (auto a = st.library_->artists(); a) {
             for (const auto& art : *a) {
+                ImGui::PushID(static_cast<int>(art.id));
                 const bool sel = (art.name == st.selected_artist);
                 if (ImGui::Selectable(art.name.c_str(), sel)) {
                     st.selected_artist = art.name;
                     st.selected_album_id = 0;
                 }
+                if (ImGui::BeginPopupContextItem()) {
+                    if (ImGui::MenuItem("Play all")) {
+                        library::SearchFilter f;
+                        f.artist = art.name;
+                        f.sort_by = library::SortBy::Album;
+                        if (auto tracks = st.library_->search(f); tracks && !tracks->empty()) {
+                            play_album(st, *tracks, 0);
+                        }
+                    }
+                    if (ImGui::MenuItem("Add all to queue")) {
+                        library::SearchFilter f;
+                        f.artist = art.name;
+                        f.sort_by = library::SortBy::Album;
+                        if (auto tracks = st.library_->search(f); tracks) {
+                            for (const auto& t : *tracks) {
+                                st.queue_append(t.path);
+                            }
+                        }
+                    }
+                    ImGui::EndPopup();
+                }
                 ImGui::SameLine();
                 ImGui::TextColored(kMuted, "(%lld alb · %lld)",
                                    static_cast<long long>(art.album_count),
                                    static_cast<long long>(art.track_count));
+                ImGui::PopID();
             }
         } else {
             ImGui::TextColored(kMuted, "(no artists)");
