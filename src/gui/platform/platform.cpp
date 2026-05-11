@@ -91,8 +91,16 @@ Window::create(const WindowConfig& cfg) {
     constexpr const char* kFont =
         "/home/raj/.local/share/fonts/JetBrainsMono/"
         "JetBrainsMonoNerdFont-Regular.ttf";
+    // Glyph ranges: Basic Latin + the Miscellaneous Technical block that
+    // contains the media-control symbols used throughout the UI (⏸⏹⏮⏭ etc.,
+    // U+2300-U+23FF). Without this range they render as boxes.
+    static constexpr ImWchar kGlyphRanges[] = {
+        0x0020, 0x00FF,  // Basic Latin + Latin-1 Supplement
+        0x2300, 0x23FF,  // Miscellaneous Technical (media symbols)
+        0,
+    };
     if (std::filesystem::exists(kFont)) {
-        io.Fonts->AddFontFromFileTTF(kFont, 17.0f);
+        io.Fonts->AddFontFromFileTTF(kFont, 17.0f, nullptr, kGlyphRanges);
     } else {
         ImFontConfig fcfg;
         fcfg.SizePixels = 15.0f;
