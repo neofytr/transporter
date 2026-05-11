@@ -761,6 +761,22 @@ void handle_view_shortcuts(AppState& st) {
             }
         }
     }
+    if (ImGui::IsKeyPressed(ImGuiKey_S)) {
+        st.queue_shuffle_toggle();
+        if (st.dbus_) {
+            st.dbus_->notify_shuffle_changed();
+        }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+        switch (st.repeat_mode) {
+        case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One;  break;
+        case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All;  break;
+        case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+        }
+        if (st.dbus_) {
+            st.dbus_->notify_loop_status_changed();
+        }
+    }
 }
 
 } // namespace
