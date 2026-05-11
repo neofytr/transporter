@@ -231,7 +231,24 @@ void draw_library_view(AppState& st) {
                                   al.date.empty() ? "" :
                                       (std::string{"  "} + al.date).c_str());
                     ImGui::SetNextItemOpen(sel, ImGuiCond_Always);
-                    if (ImGui::CollapsingHeader(hdr)) {
+
+                    // Build album duration string for header.
+                    char alb_dur_str[20] = {};
+                    if (auto tracks_hdr = st.library_->tracks_in_album(al.id); tracks_hdr && !tracks_hdr->empty()) {
+                        std::chrono::milliseconds album_dur{0};
+                        for (const auto& tr : *tracks_hdr) album_dur += tr.duration;
+                        if (album_dur.count() > 0) {
+                            const std::int64_t s = album_dur.count() / 1000;
+                            const std::int64_t m = s / 60;
+                            if (m >= 60) std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld:%02lld", m/60, m%60, s%60);
+                            else         std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld", m, s%60);
+                        }
+                    }
+
+                    char hdr2[160];
+                    std::snprintf(hdr2, sizeof(hdr2), "%s%s", hdr, alb_dur_str);
+
+                    if (ImGui::CollapsingHeader(hdr2)) {
                         if (al.id != st.selected_album_id) {
                             st.selected_album_id = al.id;
                         }
@@ -241,17 +258,33 @@ void draw_library_view(AppState& st) {
                                                  (*tracks)[0].path.parent_path());
                             }
                             for (std::size_t ti = 0; ti < tracks->size(); ++ti) {
-                                const auto& t = (*tracks)[ti];
+                                const auto& tr = (*tracks)[ti];
                                 char row[256];
-                                std::snprintf(row, sizeof(row), "%s. %s  [%u Hz / %u-bit]",
-                                              t.track_no.empty() ? "-" : t.track_no.c_str(),
-                                              t.title.c_str(),
-                                              t.sample_rate_hz, t.bit_depth);
+                                std::snprintf(row, sizeof(row), "%s. %s",
+                                              tr.track_no.empty() ? "-" : tr.track_no.c_str(),
+                                              tr.title.c_str());
                                 if (ImGui::Selectable(row, false,
                                                       ImGuiSelectableFlags_AllowDoubleClick)) {
                                     if (ImGui::IsMouseDoubleClicked(0)) {
                                         play_album(st, *tracks, ti);
                                     }
+                                }
+                                if (ImGui::IsItemHovered() && !tr.codec.empty()) {
+                                    ImGui::SetTooltip("%s  %u Hz  %u-bit",
+                                                      tr.codec.c_str(),
+                                                      tr.sample_rate_hz,
+                                                      static_cast<unsigned>(tr.bit_depth));
+                                }
+                                if (tr.duration.count() > 0) {
+                                    const std::int64_t s = tr.duration.count() / 1000;
+                                    char dur[12];
+                                    std::snprintf(dur, sizeof(dur), "%lld:%02lld",
+                                                  static_cast<long long>(s / 60),
+                                                  static_cast<long long>(s % 60));
+                                    const float dur_w = ImGui::CalcTextSize(dur).x + 4.0f;
+                                    ImGui::SameLine();
+                                    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - dur_w);
+                                    ImGui::TextColored(kMuted, "%s", dur);
                                 }
                                 if (ImGui::BeginPopupContextItem()) {
                                     if (ImGui::MenuItem("Play now")) {
