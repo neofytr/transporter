@@ -41,6 +41,10 @@ struct Hooks {
     std::function<std::optional<std::filesystem::path>()> previous;
     std::function<bool()> reload_config;
     std::function<void()> rescan_library;
+    std::function<bool()> shuffle_getter;
+    std::function<void(bool)> shuffle_setter;
+    std::function<std::string()> loop_status_getter;
+    std::function<void(const std::string&)> loop_status_setter;
 };
 
 // Owns the session-bus connection, the event-loop thread, and all adaptors

@@ -34,12 +34,20 @@ public:
     using NextHook = std::function<std::optional<std::filesystem::path>()>;
     using PreviousHook = std::function<std::optional<std::filesystem::path>()>;
     using LoadHook = std::function<void(const std::filesystem::path&)>;
+    using ShuffleGetter = std::function<bool()>;
+    using ShuffleSetter = std::function<void(bool)>;
+    using LoopStatusGetter = std::function<std::string()>;
+    using LoopStatusSetter = std::function<void(const std::string&)>;
 
     MprisPlayer(sdbus::IObject& obj,
                 transporter::engine::Engine* engine,
                 NextHook next,
                 PreviousHook prev,
-                LoadHook load);
+                LoadHook load,
+                ShuffleGetter shuffle_get = {},
+                ShuffleSetter shuffle_set = {},
+                LoopStatusGetter loop_get = {},
+                LoopStatusSetter loop_set = {});
 
     MprisPlayer(const MprisPlayer&) = delete;
     MprisPlayer& operator=(const MprisPlayer&) = delete;
@@ -68,6 +76,10 @@ private:
     NextHook next_hook_;
     PreviousHook prev_hook_;
     LoadHook load_hook_;
+    ShuffleGetter shuffle_get_;
+    ShuffleSetter shuffle_set_;
+    LoopStatusGetter loop_get_;
+    LoopStatusSetter loop_set_;
 
     mutable std::mutex meta_mtx_;
     std::map<std::string, sdbus::Variant> metadata_;  // current track

@@ -194,7 +194,9 @@ DbusService::start(transporter::engine::Engine* engine,
         });
         impl.player = std::make_unique<MprisPlayer>(
             *impl.mpris_obj, engine,
-            std::move(hooks.next), std::move(hooks.previous), load_hook);
+            std::move(hooks.next), std::move(hooks.previous), load_hook,
+            std::move(hooks.shuffle_getter), std::move(hooks.shuffle_setter),
+            std::move(hooks.loop_status_getter), std::move(hooks.loop_status_setter));
 
         // TrackList: minimal queue exposure. The current track id is the
         // counter the Player adaptor maintains; we surface a single-entry

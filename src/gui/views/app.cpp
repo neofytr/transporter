@@ -603,6 +603,25 @@ void open_dbus_service(AppState& st) {
             st.library_->rescan_async();
         }
     };
+    hooks.shuffle_getter = [&st] { return st.shuffle; };
+    hooks.shuffle_setter = [&st](bool v) {
+        std::lock_guard lk(st.queue_mtx);
+        st.shuffle = v;
+    };
+    hooks.loop_status_getter = [&st]() -> std::string {
+        switch (st.repeat_mode) {
+        case AppState::RepeatMode::One:  return "Track";
+        case AppState::RepeatMode::All:  return "Playlist";
+        default:                         return "None";
+        }
+    };
+    hooks.loop_status_setter = [&st](const std::string& v) {
+        AppState::RepeatMode m = AppState::RepeatMode::None;
+        if (v == "Track")    m = AppState::RepeatMode::One;
+        else if (v == "Playlist") m = AppState::RepeatMode::All;
+        std::lock_guard lk(st.queue_mtx);
+        st.repeat_mode = m;
+    };
     dbus_svc::Config dc;
     dc.enabled = st.cfg.dbus.enabled;
     auto svc = dbus_svc::DbusService::start(

@@ -78,12 +78,20 @@ MprisPlayer::MprisPlayer(sdbus::IObject& obj,
                          transporter::engine::Engine* engine,
                          NextHook next,
                          PreviousHook prev,
-                         LoadHook load)
+                         LoadHook load,
+                         ShuffleGetter shuffle_get,
+                         ShuffleSetter shuffle_set,
+                         LoopStatusGetter loop_get,
+                         LoopStatusSetter loop_set)
     : obj_(obj),
       engine_(engine),
       next_hook_(std::move(next)),
       prev_hook_(std::move(prev)),
-      load_hook_(std::move(load)) {
+      load_hook_(std::move(load)),
+      shuffle_get_(std::move(shuffle_get)),
+      shuffle_set_(std::move(shuffle_set)),
+      loop_get_(std::move(loop_get)),
+      loop_set_(std::move(loop_set)) {
     register_vtable();
 }
 
@@ -240,11 +248,23 @@ void MprisPlayer::register_vtable() {
             }
             return last_status_;
         }),
-        sdbus::registerProperty("LoopStatus").withGetter([] {
-            return std::string{"None"};
-        }),
+        sdbus::registerProperty("LoopStatus")
+            .withGetter([this] {
+                return loop_get_ ? loop_get_() : std::string{"None"};
+            })
+            .withSetter([this](const std::string& v) {
+                if (loop_set_) {
+                    loop_set_(v);
+                }
+            }),
         sdbus::registerProperty("Rate").withGetter([] { return 1.0; }),
-        sdbus::registerProperty("Shuffle").withGetter([] { return false; }),
+        sdbus::registerProperty("Shuffle")
+            .withGetter([this] { return shuffle_get_ ? shuffle_get_() : false; })
+            .withSetter([this](const bool v) {
+                if (shuffle_set_) {
+                    shuffle_set_(v);
+                }
+            }),
         sdbus::registerProperty("Metadata").withGetter([this] {
             std::lock_guard lk(meta_mtx_);
             if (metadata_.empty()) {
