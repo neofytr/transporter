@@ -139,10 +139,33 @@ transporter --no-gui /path/to/track.flac
 
 ```toml
 [device]
+# hw: string for the DAC to claim at startup. Saved automatically when you
+# pick a device in the GUI; you rarely need to set this manually.
 preferred = "hw:CARD=Topping_E70,DEV=0"
+
+[audio]
+# ALSA period size in milliseconds and number of periods per ring.
+# Total latency ≈ period_ms × period_count. Defaults: 12 ms × 4 = ~50 ms.
+period_ms = 12
+period_count = 4
+# RT scheduling policy: "auto" tries SCHED_FIFO, falls back to SCHED_OTHER;
+# "fifo" requires RT capability (fails hard if not granted); "other" disables RT.
+rt_policy = "auto"
 
 [library]
 roots = ["/home/user/Music"]
+# Glob patterns to skip during scanning (e.g. hidden dirs, sample packs).
+ignore_patterns = [".*", "Samples"]
+
+[theme]
+# Follow Hyprland border/gap colours from ~/.config/hypr/hyprland.conf.
+follow_hyprland = true
+# Override with a custom theme TOML file (disables Hyprland detection when set).
+# override_file = "~/.config/transporter/theme.toml"
+
+[ui]
+# View shown at startup: "main", "library", or "pipeline".
+default_view = "main"
 
 [dbus]
 enabled = true
