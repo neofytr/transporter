@@ -514,15 +514,19 @@ void draw_main_view(AppState& st) {
     // Transport row
     const bool playing = (snap.engine_state == engine::State::Playing);
     if (ImGui::Button(playing ? "Pause" : "Play")) {
-        if (playing) {
-            (void)st.engine_->pause();
-        } else {
-            (void)st.engine_->play();
+        if (st.engine_ != nullptr) {
+            if (playing) {
+                (void)st.engine_->pause();
+            } else {
+                (void)st.engine_->play();
+            }
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("Stop")) {
-        (void)st.engine_->stop();
+        if (st.engine_ != nullptr) {
+            (void)st.engine_->stop();
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Prev")) {
