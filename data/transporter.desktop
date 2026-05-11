@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=transporter
+GenericName=Music Player
+Comment=Minimal bit-perfect Linux music player
+Exec=transporter %U
+Terminal=false
+Categories=Audio;Music;Player;
+MimeType=audio/flac;audio/x-flac;audio/mpeg;audio/ogg;audio/x-vorbis+ogg;audio/opus;audio/x-opus+ogg;audio/x-aiff;audio/aiff;audio/wav;audio/x-wav;audio/mp4;audio/x-m4a;
+Keywords=music;audio;player;flac;bit-perfect;alsa;
+StartupNotify=false

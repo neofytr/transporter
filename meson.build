@@ -70,5 +70,10 @@ executable(
   install : true,
 )
 
+install_data(
+  'data/transporter.desktop',
+  install_dir : get_option('datadir') / 'applications',
+)
+
 subdir('tests/unit')
 subdir('tests/integration')
