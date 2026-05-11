@@ -251,6 +251,7 @@ void draw_library_view(AppState& st) {
                 if (ImGui::Selectable(label.c_str())) {
                     play_track(st, t);
                 }
+                const bool ctx = ImGui::BeginPopupContextItem();
                 if (t.duration.count() > 0) {
                     const std::string dur = fmt_dur(t.duration);
                     const float dur_w = ImGui::CalcTextSize(dur.c_str()).x + 4.0f;
@@ -258,7 +259,7 @@ void draw_library_view(AppState& st) {
                     ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - dur_w);
                     ImGui::TextColored(kMuted, "%s", dur.c_str());
                 }
-                if (ImGui::BeginPopupContextItem()) {
+                if (ctx) {
                     if (ImGui::MenuItem("Play now")) {
                         play_track(st, t);
                     }
@@ -376,7 +377,9 @@ void draw_library_view(AppState& st) {
                 std::snprintf(hdr2, sizeof(hdr2), "%s%s", hdr, alb_dur_str);
 
                 ImGui::SetNextItemOpen(sel, ImGuiCond_Always);
-                if (ImGui::CollapsingHeader(hdr2)) {
+                const bool hdr_open = ImGui::CollapsingHeader(hdr2);
+                const bool album_ctx = ImGui::BeginPopupContextItem("##album_ctx");
+                if (hdr_open) {
                     if (al.id != st.selected_album_id) {
                         st.selected_album_id = al.id;
                     }
@@ -397,6 +400,7 @@ void draw_library_view(AppState& st) {
                                     play_album(st, *tracks, ti);
                                 }
                             }
+                            const bool tr_ctx = ImGui::BeginPopupContextItem();
                             if (ImGui::IsItemHovered() && !tr.codec.empty()) {
                                 ImGui::SetTooltip("%s  %u Hz  %u-bit",
                                                   tr.codec.c_str(),
@@ -410,7 +414,7 @@ void draw_library_view(AppState& st) {
                                 ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - dur_w);
                                 ImGui::TextColored(kMuted, "%s", dur.c_str());
                             }
-                            if (ImGui::BeginPopupContextItem()) {
+                            if (tr_ctx) {
                                 if (ImGui::MenuItem("Play now")) {
                                     play_album(st, *tracks, ti);
                                 }
@@ -425,7 +429,7 @@ void draw_library_view(AppState& st) {
                         }
                     }
                 }
-                if (ImGui::BeginPopupContextItem("##album_ctx")) {
+                if (album_ctx) {
                     if (ImGui::MenuItem("Play album")) {
                         if (tracks && !tracks->empty()) {
                             play_album(st, *tracks, 0);
