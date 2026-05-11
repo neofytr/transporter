@@ -165,6 +165,34 @@ TEST_CASE("queue_previous: no wrap in RepeatMode::None at first track") {
     CHECK(st.queue_index == 0); // unchanged
 }
 
+TEST_CASE("queue_next: repeat-all wraps from last to first, updates index") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 2); // c is current (last)
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::All;
+    const auto p = st.queue_next();
+    REQUIRE(p.has_value());
+    CHECK(p->string() == "/a");
+    CHECK(st.queue_index == 0);
+}
+
+TEST_CASE("queue_next: repeat-none at last track returns nullopt") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b"}, 1); // b is current (last)
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::None;
+    CHECK(!st.queue_next().has_value());
+    CHECK(st.queue_index == 1); // unchanged
+}
+
+TEST_CASE("queue_next: repeat-one returns current, does not advance index") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 1); // b is current
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::One;
+    const auto p = st.queue_next();
+    REQUIRE(p.has_value());
+    CHECK(p->string() == "/b");
+    CHECK(st.queue_index == 1); // unchanged
+}
+
 TEST_CASE("queue_move: swapping last two elements updates current") {
     transporter::gui::AppState st;
     fill(st, {"/a", "/b", "/c"}, 2); // c is current
