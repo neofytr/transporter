@@ -285,9 +285,14 @@ void AppState::queue_remove(std::int32_t idx) {
 void AppState::refresh_preload() {
     if (engine_ == nullptr) return;
     engine_->cancel_preload();
-    pending_preload_path.clear();
-    if (auto peek = queue_peek_next(); peek) {
-        pending_preload_path = *peek;
+    // Peek first (acquires queue_mtx internally), then update pending_preload_path
+    // under queue_mtx so the engine event callback sees a consistent view.
+    auto peek = queue_peek_next();
+    {
+        std::lock_guard lk(queue_mtx);
+        pending_preload_path = peek ? peek->string() : std::string{};
+    }
+    if (peek) {
         (void)engine_->preload(*peek);
     }
 }
@@ -497,19 +502,29 @@ void wire_engine_events(AppState& st) {
             });
             // If the loaded file matches the preloaded path, a gapless swap
             // just occurred: advance queue_index to reflect the new position.
-            if (!st.pending_preload_path.empty() &&
-                ev.file_path == st.pending_preload_path) {
+            // pending_preload_path is guarded by queue_mtx (shared with the
+            // main thread which also writes it via refresh_preload).
+            {
                 std::lock_guard lk(st.queue_mtx);
-                if (st.queue_index + 1 <
-                        static_cast<std::int32_t>(st.queue.size())) {
-                    ++st.queue_index;
+                if (!st.pending_preload_path.empty() &&
+                    ev.file_path == st.pending_preload_path) {
+                    if (st.queue_index + 1 <
+                            static_cast<std::int32_t>(st.queue.size())) {
+                        ++st.queue_index;
+                    }
                 }
+                st.pending_preload_path.clear();
             }
-            st.pending_preload_path.clear();
             // Speculatively open the next decoder so it is ready at EOF.
+            // queue_peek_next acquires queue_mtx internally; take the peek
+            // result before re-locking to avoid recursion.
             if (st.engine_ != nullptr) {
-                if (auto peek = st.queue_peek_next(); peek) {
-                    st.pending_preload_path = *peek;
+                auto peek = st.queue_peek_next();
+                {
+                    std::lock_guard lk(st.queue_mtx);
+                    st.pending_preload_path = peek ? peek->string() : std::string{};
+                }
+                if (peek) {
                     (void)st.engine_->preload(*peek);
                 }
             }
