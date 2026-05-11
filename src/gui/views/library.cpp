@@ -233,13 +233,14 @@ void draw_library_view(AppState& st) {
                                   al.track_count == 1 ? "" : "s",
                                   al.date.empty() ? "" :
                                       (std::string{"  "} + al.date).c_str());
-                    ImGui::SetNextItemOpen(sel, ImGuiCond_Always);
 
-                    // Build album duration string for header.
+                    // Query once; reused for header duration, track list, and context menu.
+                    auto tracks = st.library_->tracks_in_album(al.id);
+
                     char alb_dur_str[32] = {};
-                    if (auto tracks_hdr = st.library_->tracks_in_album(al.id); tracks_hdr && !tracks_hdr->empty()) {
+                    if (tracks && !tracks->empty()) {
                         std::chrono::milliseconds album_dur{0};
-                        for (const auto& tr : *tracks_hdr) album_dur += tr.duration;
+                        for (const auto& tr : *tracks) album_dur += tr.duration;
                         if (album_dur.count() > 0) {
                             const std::int64_t s = album_dur.count() / 1000;
                             const std::int64_t m = s / 60;
@@ -251,11 +252,12 @@ void draw_library_view(AppState& st) {
                     char hdr2[192];
                     std::snprintf(hdr2, sizeof(hdr2), "%s%s", hdr, alb_dur_str);
 
+                    ImGui::SetNextItemOpen(sel, ImGuiCond_Always);
                     if (ImGui::CollapsingHeader(hdr2)) {
                         if (al.id != st.selected_album_id) {
                             st.selected_album_id = al.id;
                         }
-                        if (auto tracks = st.library_->tracks_in_album(al.id); tracks) {
+                        if (tracks) {
                             if (!tracks->empty()) {
                                 draw_album_thumb(al.id, al.title,
                                                  (*tracks)[0].path.parent_path());
@@ -306,12 +308,12 @@ void draw_library_view(AppState& st) {
                     }
                     if (ImGui::BeginPopupContextItem(hdr)) {
                         if (ImGui::MenuItem("Play album")) {
-                            if (auto tracks = st.library_->tracks_in_album(al.id); tracks && !tracks->empty()) {
+                            if (tracks && !tracks->empty()) {
                                 play_album(st, *tracks, 0);
                             }
                         }
                         if (ImGui::MenuItem("Add album to queue")) {
-                            if (auto tracks = st.library_->tracks_in_album(al.id); tracks) {
+                            if (tracks) {
                                 for (const auto& t : *tracks) {
                                     st.queue_append(t.path);
                                 }
