@@ -638,10 +638,20 @@ void draw_mini_view(AppState& st) {
     if (ImGui::SmallButton("full")) { st.mini_mode = false; }
     ImGui::SameLine();
 
-    const char* title = snap.source.tags.title.empty()
-        ? (snap.source.file_path.empty() ? "\xe2\x80\x94" : snap.source.file_path.c_str())
-        : snap.source.tags.title.c_str();
-    ImGui::TextColored(kMuted, "%s", title);
+    // Title — Artist (or fallback to filename stem)
+    {
+        std::string display;
+        if (!snap.source.tags.title.empty()) {
+            display = snap.source.tags.title;
+            if (!snap.source.tags.artist.empty())
+                display += "  \xe2\x80\x94  " + snap.source.tags.artist;
+        } else if (!snap.source.file_path.empty()) {
+            display = std::filesystem::path{snap.source.file_path}.stem().string();
+        } else {
+            display = "\xe2\x80\x94";
+        }
+        ImGui::TextColored(kMuted, "%s", display.c_str());
+    }
     ImGui::SameLine();
 
     const std::int64_t total_ms = snap.source.duration.count();
@@ -670,6 +680,8 @@ void draw_mini_view(AppState& st) {
         if (ImGui::SmallButton("\xe2\x8f\xad")) {
             if (auto n = st.queue_next(); n) { (void)st.engine_->load(*n); (void)st.engine_->play(); }
         }
+        ImGui::SameLine();
+        verdict_badge(snap);
     }
 }
 
