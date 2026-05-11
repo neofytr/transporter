@@ -3,6 +3,7 @@
 // Scan the fixture tree, then exercise the search API: free-text FTS,
 // per-column filters, sort, limit, offset.
 
+#include <transporter/engine/error.hpp>
 #include <transporter/library/library.hpp>
 
 #include <atomic>
@@ -180,6 +181,40 @@ int main(int argc, char** argv) {
         if (!r || r->size() != 7) {
             return fail("empty query",
                         r ? std::to_string(r->size()) : r.error().message);
+        }
+    }
+
+    // track_by_path: known path returns the track with correct metadata.
+    {
+        SearchFilter f;
+        f.query = "Shimmer";
+        auto r = lib.search(f);
+        if (!r || r->empty()) {
+            return fail("track_by_path setup", "shimmer not found");
+        }
+        const fs::path known = r->front().path;
+        auto t = lib.track_by_path(known);
+        if (!t) {
+            return fail("track_by_path hit", t.error().message);
+        }
+        if (t->path != known) {
+            return fail("track_by_path path mismatch", t->path.string());
+        }
+        if (t->title != "Shimmer") {
+            return fail("track_by_path title", t->title);
+        }
+    }
+
+    // track_by_path: non-existent path returns NotFound.
+    {
+        const fs::path ghost = work_root / "does" / "not" / "exist.flac";
+        auto t = lib.track_by_path(ghost);
+        if (t) {
+            return fail("track_by_path miss", "expected error, got track");
+        }
+        if (t.error().code != transporter::engine::ErrorCode::NotFound) {
+            return fail("track_by_path miss code",
+                        std::to_string(static_cast<int>(t.error().code)));
         }
     }
 
