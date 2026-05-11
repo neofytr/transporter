@@ -40,6 +40,24 @@ bool sqlite_has_object(sqlite3* db, const char* type, const char* name) {
     return found;
 }
 
+bool sqlite_has_column(sqlite3* db, const char* table, const char* col) {
+    sqlite3_stmt* stmt = nullptr;
+    const std::string sql = std::string("PRAGMA table_info(") + table + ")";
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const auto* name = sqlite3_column_text(stmt, 1);
+        if (name && std::string(reinterpret_cast<const char*>(name)) == col) {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
 int journal_mode(sqlite3* db, std::string& out) {
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, "PRAGMA journal_mode", -1, &stmt, nullptr)
@@ -127,8 +145,13 @@ int main(int /*argc*/, char** /*argv*/) {
         }
     }
 
+    if (!sqlite_has_column(db, "tracks", "disc_no")) {
+        sqlite3_close(db);
+        return fail("missing column", "tracks.disc_no");
+    }
+
     int v = -1;
-    if (!max_version(db, v) || v != 1) {
+    if (!max_version(db, v) || v != 2) {
         sqlite3_close(db);
         return fail("schema version", std::to_string(v));
     }

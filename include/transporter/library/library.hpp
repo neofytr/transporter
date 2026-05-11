@@ -33,8 +33,6 @@ struct Track {
     std::string disc_no;
     std::string date;
     std::string codec;
-    std::string replaygain_track_gain;
-    std::string replaygain_album_gain;
     std::uint32_t sample_rate_hz;
     std::uint16_t channels;
     std::uint16_t bit_depth;

@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS tracks (
     album            TEXT    NOT NULL DEFAULT '',
     album_artist     TEXT    NOT NULL DEFAULT '',
     track_no         TEXT    NOT NULL DEFAULT '',
-    disc_no          TEXT    NOT NULL DEFAULT '',
     date             TEXT    NOT NULL DEFAULT '',
     codec            TEXT    NOT NULL DEFAULT '',
     sample_rate_hz   INTEGER NOT NULL DEFAULT 0,
