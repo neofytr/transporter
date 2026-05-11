@@ -158,6 +158,9 @@ void source_card(const PipelineSnapshot& s) {
         kv("duration", buf);
     }
     kv("tag artist", s.source.tags.artist);
+    if (!s.source.tags.album_artist.empty() &&
+        s.source.tags.album_artist != s.source.tags.artist)
+        kv("tag album artist", s.source.tags.album_artist);
     kv("tag album", s.source.tags.album);
     kv("tag title", s.source.tags.title);
     kv("tag track", s.source.tags.track_no);
