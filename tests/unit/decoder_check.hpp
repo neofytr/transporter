@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,10 +83,43 @@ inline int run_check(const char* path, const Expected& exp) {
         }
     }
 
-    // Drain. Buffer one period (~16 KB).
+    // Seek-round-trip: read a small chunk, seek back to 0, read the same
+    // chunk again, and verify the bytes are identical (lossless) or that
+    // the seek at least doesn't error (lossy).
     constexpr std::size_t MAX_FRAMES = 4096;
     const unsigned frame_bytes = fmt.frame_bytes();
     std::vector<std::byte> buf(MAX_FRAMES * frame_bytes);
+    {
+        std::vector<std::byte> first(MAX_FRAMES * frame_bytes);
+        auto r1 = dec.read(std::span<std::byte>(first), MAX_FRAMES);
+        if (!r1) {
+            return fail("seek-test read1", r1.error().message);
+        }
+        const std::size_t n1 = *r1;
+        if (n1 > 0) {
+            auto sk = dec.seek_frame(0);
+            if (!sk) {
+                return fail("seek_frame(0)", sk.error().message);
+            }
+            auto r2 = dec.read(std::span<std::byte>(buf), MAX_FRAMES);
+            if (!r2) {
+                return fail("seek-test read2", r2.error().message);
+            }
+            if (*r2 != n1) {
+                return fail("seek-test frame count mismatch", std::to_string(*r2));
+            }
+            if (exp.lossless &&
+                std::memcmp(first.data(), buf.data(), n1 * frame_bytes) != 0) {
+                return fail("seek-test byte mismatch after seek_frame(0)", {});
+            }
+            // Seek back to 0 again so the drain below starts from the beginning.
+            if (auto sk2 = dec.seek_frame(0); !sk2) {
+                return fail("seek_frame(0) restore", sk2.error().message);
+            }
+        }
+    }
+
+    // Drain. Buffer one period (~16 KB).
     std::uint64_t total_read = 0;
     while (true) {
         auto r = dec.read(std::span<std::byte>(buf), MAX_FRAMES);

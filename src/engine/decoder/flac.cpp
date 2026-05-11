@@ -293,15 +293,18 @@ FlacDecoder::read(std::span<std::byte> dst, std::size_t max_frames) {
 }
 
 std::expected<void, Error> FlacDecoder::seek_frame(std::uint64_t frame) {
-    if (!FLAC__stream_decoder_seek_absolute(decoder_.get(), frame)) {
-        return std::unexpected(
-            Error{ErrorCode::DecoderSeekFailed, "FLAC seek_absolute failed"});
-    }
+    // Pre-clear so write_cb's internal clear during seek_absolute is a no-op.
+    // Do NOT clear carry_ again after the call: seek_absolute may call write_cb
+    // to decode the target block, leaving carry_ populated and ready to read.
     carry_.clear();
     carry_off_ = 0;
     eof_ = false;
     error_ = false;
     error_msg_.clear();
+    if (!FLAC__stream_decoder_seek_absolute(decoder_.get(), frame)) {
+        return std::unexpected(
+            Error{ErrorCode::DecoderSeekFailed, "FLAC seek_absolute failed"});
+    }
     return {};
 }
 
