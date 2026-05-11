@@ -110,10 +110,7 @@ void draw_queue_view(AppState& st) {
 
         if (ImGui::BeginPopupContextItem()) {
             if (ImGui::MenuItem("Play now")) {
-                if (st.queue_jump_to(i) && st.engine_) {
-                    (void)st.engine_->load(path);
-                    (void)st.engine_->play();
-                }
+                (void)st.queue_jump_to(i);
             }
             ImGui::Separator();
             const bool can_up   = (i > 0);

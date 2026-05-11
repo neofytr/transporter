@@ -120,6 +120,7 @@ void play_album(AppState& st, const std::vector<library::Track>& album_tracks,
         }
         st.queue_index = static_cast<std::int32_t>(idx);
     }
+    st.recompute_queue_duration();
     auto r = st.engine_->load(album_tracks[idx].path);
     if (!r) {
         st.push_log(std::string{"load failed: "} + r.error().message);
