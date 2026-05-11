@@ -177,7 +177,12 @@ std::optional<std::filesystem::path> AppState::queue_next() {
 
 std::optional<std::filesystem::path> AppState::queue_previous() {
     std::lock_guard lk(queue_mtx);
-    if (queue.empty() || queue_index <= 0) {
+    if (queue.empty()) return std::nullopt;
+    if (queue_index <= 0) {
+        if (repeat_mode == RepeatMode::All) {
+            queue_index = static_cast<std::int32_t>(queue.size()) - 1;
+            return queue[static_cast<std::size_t>(queue_index)];
+        }
         return std::nullopt;
     }
     --queue_index;

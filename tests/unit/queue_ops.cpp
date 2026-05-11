@@ -147,6 +147,24 @@ TEST_CASE("queue_peek_next: repeat-all wraps at end") {
     CHECK(p->string() == "/a"); // wraps to first
 }
 
+TEST_CASE("queue_previous: repeat-all wraps from first to last") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 0); // a is current (first)
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::All;
+    const auto p = st.queue_previous();
+    REQUIRE(p.has_value());
+    CHECK(p->string() == "/c"); // wraps to last
+    CHECK(st.queue_index == 2);
+}
+
+TEST_CASE("queue_previous: no wrap in RepeatMode::None at first track") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b"}, 0); // a is current (first)
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::None;
+    CHECK(!st.queue_previous().has_value());
+    CHECK(st.queue_index == 0); // unchanged
+}
+
 TEST_CASE("queue_move: swapping last two elements updates current") {
     transporter::gui::AppState st;
     fill(st, {"/a", "/b", "/c"}, 2); // c is current
