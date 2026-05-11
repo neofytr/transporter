@@ -25,6 +25,21 @@ constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
 
 constexpr float kThumbSize = 64.0f;
 
+// Format a millisecond duration as H:MM:SS or M:SS.
+std::string fmt_dur(std::chrono::milliseconds ms) {
+    const long long total_s = ms.count() / 1000;
+    const long long h = total_s / 3600;
+    const long long m = (total_s % 3600) / 60;
+    const long long s = total_s % 60;
+    char buf[32];
+    if (h > 0) {
+        std::snprintf(buf, sizeof(buf), "%lld:%02lld:%02lld", h, m, s);
+    } else {
+        std::snprintf(buf, sizeof(buf), "%lld:%02lld", m, s);
+    }
+    return buf;
+}
+
 // Per-album art cache. Key is album id; value is the decoded art (or an
 // empty AlbumArt if no cover was found, so we don't re-probe every frame).
 // Lives for the process lifetime — albums don't change without restart.
@@ -237,15 +252,11 @@ void draw_library_view(AppState& st) {
                     play_track(st, t);
                 }
                 if (t.duration.count() > 0) {
-                    const std::int64_t s = t.duration.count() / 1000;
-                    char dur[20];
-                    std::snprintf(dur, sizeof(dur), "%lld:%02lld",
-                                  static_cast<long long>(s / 60),
-                                  static_cast<long long>(s % 60));
-                    const float dur_w = ImGui::CalcTextSize(dur).x + 4.0f;
+                    const std::string dur = fmt_dur(t.duration);
+                    const float dur_w = ImGui::CalcTextSize(dur.c_str()).x + 4.0f;
                     ImGui::SameLine();
                     ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - dur_w);
-                    ImGui::TextColored(kMuted, "%s", dur);
+                    ImGui::TextColored(kMuted, "%s", dur.c_str());
                 }
                 if (ImGui::BeginPopupContextItem()) {
                     if (ImGui::MenuItem("Play now")) {
@@ -356,10 +367,8 @@ void draw_library_view(AppState& st) {
                     std::chrono::milliseconds album_dur{0};
                     for (const auto& tr : *tracks) album_dur += tr.duration;
                     if (album_dur.count() > 0) {
-                        const std::int64_t s = album_dur.count() / 1000;
-                        const std::int64_t m = s / 60;
-                        if (m >= 60) std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld:%02lld", static_cast<long long>(m/60), static_cast<long long>(m%60), static_cast<long long>(s%60));
-                        else         std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld", static_cast<long long>(m), static_cast<long long>(s%60));
+                        const std::string alb_dur_fmt = "  " + fmt_dur(album_dur);
+                        std::snprintf(alb_dur_str, sizeof(alb_dur_str), "%s", alb_dur_fmt.c_str());
                     }
                 }
 
@@ -395,15 +404,11 @@ void draw_library_view(AppState& st) {
                                                   static_cast<unsigned>(tr.bit_depth));
                             }
                             if (tr.duration.count() > 0) {
-                                const std::int64_t s = tr.duration.count() / 1000;
-                                char dur[20];
-                                std::snprintf(dur, sizeof(dur), "%lld:%02lld",
-                                              static_cast<long long>(s / 60),
-                                              static_cast<long long>(s % 60));
-                                const float dur_w = ImGui::CalcTextSize(dur).x + 4.0f;
+                                const std::string dur = fmt_dur(tr.duration);
+                                const float dur_w = ImGui::CalcTextSize(dur.c_str()).x + 4.0f;
                                 ImGui::SameLine();
                                 ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - dur_w);
-                                ImGui::TextColored(kMuted, "%s", dur);
+                                ImGui::TextColored(kMuted, "%s", dur.c_str());
                             }
                             if (ImGui::BeginPopupContextItem()) {
                                 if (ImGui::MenuItem("Play now")) {
