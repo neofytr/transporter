@@ -92,6 +92,9 @@ public:
     // Resize the window; takes effect at the start of the next begin_frame().
     void resize(int w, int h);
 
+    // Update the compositor window title (best-effort; no-op if surface not ready).
+    void set_title(const std::string& title);
+
     // Read-and-clear XF86 media key flags. Each returns true once per key event.
     bool take_media_play_pause() noexcept;
     bool take_media_stop()       noexcept;

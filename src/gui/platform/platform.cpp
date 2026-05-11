@@ -176,4 +176,11 @@ void Window::resize(int w, int h) {
     impl_->needs_resize = true;
 }
 
+void Window::set_title(const std::string& title) {
+    if (impl_->toplevel) {
+        xdg_toplevel_set_title(impl_->toplevel, title.c_str());
+        wl_display_flush(impl_->display);
+    }
+}
+
 } // namespace transporter::gui::platform

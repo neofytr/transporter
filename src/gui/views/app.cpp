@@ -771,6 +771,30 @@ int run(const AppArgs& args) {
 
         win.begin_frame();
 
+        // Update compositor title at ~1 Hz to reflect the playing track.
+        {
+            static std::string s_last_title;
+            static std::chrono::steady_clock::time_point s_last_check{};
+            const auto now_tp = std::chrono::steady_clock::now();
+            if (now_tp - s_last_check > std::chrono::seconds(1)) {
+                s_last_check = now_tp;
+                std::string new_title = "transporter";
+                if (st.engine_) {
+                    const auto snap = st.engine_->pipeline_snapshot();
+                    if (!snap.source.tags.title.empty()) {
+                        new_title = snap.source.tags.title;
+                        if (!snap.source.tags.artist.empty())
+                            new_title = snap.source.tags.artist + " \xe2\x80\x94 " + new_title;
+                        new_title += " \xc2\xb7 transporter";
+                    }
+                }
+                if (new_title != s_last_title) {
+                    s_last_title = new_title;
+                    win.set_title(new_title);
+                }
+            }
+        }
+
         // Full-window dock
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(vp->Pos);
