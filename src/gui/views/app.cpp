@@ -287,6 +287,34 @@ void AppState::queue_move(std::int32_t from_idx, std::int32_t to_idx) {
     }
 }
 
+void AppState::queue_move_to_top(std::int32_t idx) {
+    std::lock_guard lk(queue_mtx);
+    const auto n = static_cast<std::int32_t>(queue.size());
+    if (idx <= 0 || idx >= n) {
+        return;
+    }
+    std::rotate(queue.begin(), queue.begin() + idx, queue.begin() + idx + 1);
+    if (queue_index == idx) {
+        queue_index = 0;
+    } else if (queue_index < idx) {
+        ++queue_index;
+    }
+}
+
+void AppState::queue_move_to_bottom(std::int32_t idx) {
+    std::lock_guard lk(queue_mtx);
+    const auto n = static_cast<std::int32_t>(queue.size());
+    if (idx < 0 || idx >= n - 1) {
+        return;
+    }
+    std::rotate(queue.begin() + idx, queue.begin() + idx + 1, queue.end());
+    if (queue_index == idx) {
+        queue_index = n - 1;
+    } else if (queue_index > idx) {
+        --queue_index;
+    }
+}
+
 void AppState::queue_clear() {
     std::lock_guard lk(queue_mtx);
     queue.clear();

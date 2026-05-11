@@ -120,6 +120,8 @@ struct AppState {
     bool queue_jump_to(std::int32_t idx);
     void queue_remove(std::int32_t idx);
     void queue_move(std::int32_t from_idx, std::int32_t to_idx);
+    void queue_move_to_top(std::int32_t idx);
+    void queue_move_to_bottom(std::int32_t idx);
     void queue_clear();
     void queue_shuffle_toggle();
 
