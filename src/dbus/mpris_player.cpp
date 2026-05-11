@@ -245,6 +245,14 @@ void MprisPlayer::register_vtable() {
                 const std::int64_t target =
                     std::max(std::int64_t{0}, cur_frame + delta_frames);
                 (void)engine_->seek(static_cast<std::uint64_t>(target));
+                // Emit Seeked with estimated new position in microseconds.
+                const std::int64_t new_pos_us =
+                    (target * 1'000'000LL) / static_cast<std::int64_t>(rate);
+                try {
+                    obj_.emitSignal(sdbus::SignalName{"Seeked"})
+                        .onInterface(sdbus::InterfaceName{kIface})
+                        .withArguments(new_pos_us);
+                } catch (const sdbus::Error&) {}
             }),
         sdbus::registerMethod("SetPosition")
             .withInputParamNames("TrackId", "Position")
@@ -260,6 +268,11 @@ void MprisPlayer::register_vtable() {
                 const std::uint64_t frame =
                     (static_cast<std::uint64_t>(pos_us) * rate) / 1'000'000ULL;
                 (void)engine_->seek(frame);
+                try {
+                    obj_.emitSignal(sdbus::SignalName{"Seeked"})
+                        .onInterface(sdbus::InterfaceName{kIface})
+                        .withArguments(pos_us);
+                } catch (const sdbus::Error&) {}
             }),
         sdbus::registerMethod("OpenUri")
             .withInputParamNames("Uri")
