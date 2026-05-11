@@ -123,12 +123,6 @@ void destroy_egl(WindowImpl& w) {
     w.gl_initialized = false;
 }
 
-void egl_swap(WindowImpl& w) {
-    eglSwapBuffers(
-        static_cast<EGLDisplay>(w.egl_display),
-        static_cast<EGLSurface>(w.egl_surface));
-}
-
 void egl_resize(WindowImpl& w) {
     wl_egl_window_resize(
         static_cast<wl_egl_window*>(w.egl_window),
@@ -163,7 +157,6 @@ namespace transporter::gui::platform {
 
 bool init_egl(WindowImpl&)   { return false; }
 void destroy_egl(WindowImpl&) {}
-void egl_swap(WindowImpl&)    {}
 void egl_resize(WindowImpl&)  {}
 void egl_render_frame(WindowImpl&, float, float, float) {}
 

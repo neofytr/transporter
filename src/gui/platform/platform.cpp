@@ -123,9 +123,9 @@ Window::create(const WindowConfig& cfg) {
     if (s.render_mode == RenderMode::GPU) {
         // ImGui_ImplOpenGL3_Init uploads the font atlas to a GL texture
         // and sets its own TexID — no manual SetTexID needed.
+        // On failure the backend leaves BackendRendererUserData unset, so
+        // calling Shutdown is unsafe; just tear EGL down and fall through.
         if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
-            // GL init failed; fall back to CPU path.
-            ImGui_ImplOpenGL3_Shutdown();
             destroy_egl(s);
             s.render_mode = RenderMode::CPU;
         } else {

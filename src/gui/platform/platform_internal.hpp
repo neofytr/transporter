@@ -93,7 +93,9 @@ struct WindowImpl {
     int            font_atlas_w  = 0;
     int            font_atlas_h  = 0;
 
-    RenderMode render_mode = RenderMode::GPU;
+    // Default to CPU so partial-init teardown sees the safe path; create()
+    // upgrades to GPU once init_egl + ImGui_ImplOpenGL3_Init both succeed.
+    RenderMode render_mode = RenderMode::CPU;
 
     // EGL/GL fields (used only when render_mode == GPU)
     void* egl_display    = nullptr;  // EGLDisplay
@@ -129,7 +131,6 @@ void input_pump_imgui(WindowImpl& w);
 // egl.cpp
 bool init_egl(WindowImpl& w);
 void destroy_egl(WindowImpl& w);
-void egl_swap(WindowImpl& w);
 void egl_resize(WindowImpl& w);
 // GL viewport/clear + ImGui draw + swap. Called from end_frame on GPU path.
 void egl_render_frame(WindowImpl& w, float r, float g, float b);
