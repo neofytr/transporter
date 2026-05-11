@@ -213,30 +213,67 @@ void render_frame(WindowImpl& w, float r, float g, float b) {
                         }
 
                         if (va.col == vb.col && va.col == vc.col && va.col == vd.col) {
-                            // Centre UV — sample atlas once for the whole quad
-                            const float cu = (va.uv.x + vb.uv.x + vc.uv.x + vd.uv.x) * 0.25f;
-                            const float cv = (va.uv.y + vb.uv.y + vc.uv.y + vd.uv.y) * 0.25f;
-                            uint32_t tex_alpha = 255u;
-                            if (w.font_pixels && w.font_atlas_w > 0 && w.font_atlas_h > 0) {
-                                const int tx = std::clamp(static_cast<int>(cu * static_cast<float>(w.font_atlas_w)), 0, w.font_atlas_w - 1);
-                                const int ty = std::clamp(static_cast<int>(cv * static_cast<float>(w.font_atlas_h)), 0, w.font_atlas_h - 1);
-                                tex_alpha = w.font_pixels[ty * w.font_atlas_w + tx];
-                            }
                             const uint32_t src_a = (va.col >> 24) & 0xFFu;
-                            const uint32_t alpha = (src_a * tex_alpha) / 255u;
-                            const uint32_t src = to_xrgb(va.col);
-
-                            if (rx0 < rx1 && ry0 < ry1) {
-                                if (alpha >= 255u) {
-                                    for (int py = ry0; py < ry1; ++py) {
-                                        uint32_t* row = pixels + py * pstride + rx0;
-                                        for (int px = rx0; px < rx1; ++px) *row++ = src;
+                            const uint32_t src   = to_xrgb(va.col);
+                            // Solid fills (button backgrounds, rects) have all four UV coords
+                            // pointing to the atlas white pixel — UV extent ≈ 0.  Sample once.
+                            // Glyph quads span a real atlas region; sampling the centre and
+                            // applying it uniformly paints every pixel identically → solid box.
+                            const float uv_dx = std::abs(va.uv.x - vc.uv.x);
+                            const float uv_dy = std::abs(va.uv.y - vc.uv.y);
+                            if (uv_dx < 1e-4f && uv_dy < 1e-4f) {
+                                // Solid fill — one atlas sample.
+                                uint32_t tex_alpha = 255u;
+                                if (w.font_pixels && w.font_atlas_w > 0 && w.font_atlas_h > 0) {
+                                    const float cu = (va.uv.x + vb.uv.x + vc.uv.x + vd.uv.x) * 0.25f;
+                                    const float cv = (va.uv.y + vb.uv.y + vc.uv.y + vd.uv.y) * 0.25f;
+                                    const int tx = std::clamp(static_cast<int>(cu * static_cast<float>(w.font_atlas_w)), 0, w.font_atlas_w - 1);
+                                    const int ty = std::clamp(static_cast<int>(cv * static_cast<float>(w.font_atlas_h)), 0, w.font_atlas_h - 1);
+                                    tex_alpha = w.font_pixels[ty * w.font_atlas_w + tx];
+                                }
+                                const uint32_t alpha = (src_a * tex_alpha) / 255u;
+                                if (rx0 < rx1 && ry0 < ry1) {
+                                    if (alpha >= 255u) {
+                                        for (int py = ry0; py < ry1; ++py) {
+                                            uint32_t* row = pixels + py * pstride + rx0;
+                                            for (int px = rx0; px < rx1; ++px) *row++ = src;
+                                        }
+                                    } else if (alpha > 0u) {
+                                        for (int py = ry0; py < ry1; ++py) {
+                                            uint32_t* row = pixels + py * pstride + rx0;
+                                            for (int px = rx0; px < rx1; ++px) {
+                                                *row = blend_over(*row, src, alpha);
+                                                ++row;
+                                            }
+                                        }
                                     }
-                                } else if (alpha > 0u) {
-                                    for (int py = ry0; py < ry1; ++py) {
-                                        uint32_t* row = pixels + py * pstride + rx0;
-                                        for (int px = rx0; px < rx1; ++px) {
+                                }
+                            } else if (src_a > 0u && rx0 < rx1 && ry0 < ry1 &&
+                                       w.font_pixels && w.font_atlas_w > 0 && w.font_atlas_h > 0) {
+                                // Glyph quad — per-pixel UV sampling.
+                                const float g_u0 = std::min({va.uv.x, vb.uv.x, vc.uv.x, vd.uv.x});
+                                const float g_v0 = std::min({va.uv.y, vb.uv.y, vc.uv.y, vd.uv.y});
+                                const float g_u1 = std::max({va.uv.x, vb.uv.x, vc.uv.x, vd.uv.x});
+                                const float g_v1 = std::max({va.uv.y, vb.uv.y, vc.uv.y, vd.uv.y});
+                                const float gqw = x1 - x0;
+                                const float gqh = y1 - y0;
+                                for (int py = ry0; py < ry1; ++py) {
+                                    const float t = gqh > 0.5f ? (static_cast<float>(py) + 0.5f - y0) / gqh : 0.0f;
+                                    const float v = g_v0 + t * (g_v1 - g_v0);
+                                    const int ty = std::clamp(static_cast<int>(v * static_cast<float>(w.font_atlas_h)), 0, w.font_atlas_h - 1);
+                                    uint32_t* row = pixels + py * pstride + rx0;
+                                    for (int px = rx0; px < rx1; ++px) {
+                                        const float s = gqw > 0.5f ? (static_cast<float>(px) + 0.5f - x0) / gqw : 0.0f;
+                                        const float u = g_u0 + s * (g_u1 - g_u0);
+                                        const int tx = std::clamp(static_cast<int>(u * static_cast<float>(w.font_atlas_w)), 0, w.font_atlas_w - 1);
+                                        const uint32_t ta = w.font_pixels[ty * w.font_atlas_w + tx];
+                                        const uint32_t alpha = (src_a * ta) / 255u;
+                                        if (alpha >= 255u) {
+                                            *row++ = src;
+                                        } else if (alpha > 0u) {
                                             *row = blend_over(*row, src, alpha);
+                                            ++row;
+                                        } else {
                                             ++row;
                                         }
                                     }
