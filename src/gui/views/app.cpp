@@ -195,6 +195,7 @@ void AppState::queue_set_single(std::filesystem::path p) {
         queue.clear();
         queue.emplace_back(std::move(p));
         queue_index = 0;
+        pending_preload_path.clear();
     }
     recompute_queue_duration();
 }

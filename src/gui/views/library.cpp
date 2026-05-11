@@ -148,6 +148,7 @@ void play_album(AppState& st, const std::vector<library::Track>& album_tracks,
             st.queue.push_back(t.path);
         }
         st.queue_index = static_cast<std::int32_t>(idx);
+        st.pending_preload_path.clear();
     }
     st.recompute_queue_duration();
     auto r = st.engine_->load(album_tracks[idx].path);
