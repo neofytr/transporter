@@ -230,6 +230,9 @@ void Scanner::thread_main() {
         wake_requested_ = false;
         lk.unlock();
 
+        if (shutdown_.load(std::memory_order_acquire)) {
+            return;
+        }
         cancel_requested_.store(false, std::memory_order_release);
 
         auto db_or = Db::open(db_path_, false);
