@@ -360,15 +360,20 @@ void AppState::queue_move_to_bottom(std::int32_t idx) {
 }
 
 void AppState::queue_clear() {
-    std::lock_guard lk(queue_mtx);
-    queue.clear();
-    queue_index = -1;
-    queue_total_duration = std::chrono::milliseconds{0};
-    queue_row_info.clear();
+    {
+        std::lock_guard lk(queue_mtx);
+        queue.clear();
+        queue_index = -1;
+        queue_total_duration = std::chrono::milliseconds{0};
+        queue_row_info.clear();
+        pending_preload_path.clear();
+    }
+    if (engine_) engine_->cancel_preload();
 }
 
 void AppState::queue_shuffle_toggle() {
-    shuffle = !shuffle;
+    { std::lock_guard lk(queue_mtx); shuffle = !shuffle; }
+    refresh_preload();
 }
 
 void AppState::recompute_queue_duration() {
@@ -732,8 +737,8 @@ void open_dbus_service(AppState& st) {
     };
     hooks.shuffle_getter = [&st] { return st.shuffle; };
     hooks.shuffle_setter = [&st](bool v) {
-        std::lock_guard lk(st.queue_mtx);
-        st.shuffle = v;
+        { std::lock_guard lk(st.queue_mtx); st.shuffle = v; }
+        st.refresh_preload();
     };
     hooks.loop_status_getter = [&st]() -> std::string {
         switch (st.repeat_mode) {
@@ -746,8 +751,8 @@ void open_dbus_service(AppState& st) {
         AppState::RepeatMode m = AppState::RepeatMode::None;
         if (v == "Track")    m = AppState::RepeatMode::One;
         else if (v == "Playlist") m = AppState::RepeatMode::All;
-        std::lock_guard lk(st.queue_mtx);
-        st.repeat_mode = m;
+        { std::lock_guard lk(st.queue_mtx); st.repeat_mode = m; }
+        st.refresh_preload();
     };
     dbus_svc::Config dc;
     dc.enabled = st.cfg.dbus.enabled;
@@ -924,6 +929,7 @@ void handle_view_shortcuts(AppState& st) {
         case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All;  break;
         case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
         }
+        st.refresh_preload();
         if (st.dbus_) {
             st.dbus_->notify_loop_status_changed();
         }

@@ -584,6 +584,7 @@ void draw_main_view(AppState& st) {
         case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All; break;
         case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
         }
+        st.refresh_preload();
         if (st.dbus_) {
             st.dbus_->notify_loop_status_changed();
         }
