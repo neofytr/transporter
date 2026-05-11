@@ -234,15 +234,7 @@ void AppState::queue_insert_next(std::filesystem::path p) {
         }
     }
     recompute_queue_duration();
-    // The "next" slot changed — cancel any stale preload and issue a fresh one.
-    if (engine_) {
-        engine_->cancel_preload();
-        pending_preload_path.clear();
-        if (auto peek = queue_peek_next(); peek) {
-            pending_preload_path = *peek;
-            (void)engine_->preload(*peek);
-        }
-    }
+    refresh_preload();
 }
 
 bool AppState::queue_jump_to(std::int32_t idx) {
