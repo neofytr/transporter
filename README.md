@@ -18,9 +18,11 @@ Bare-metal ALSA-direct playback. No sound server in the audio path, no resamplin
 - Time-synced LRC lyrics display
 - Album art thumbnails in library (cover.jpg / cover.png probed automatically)
 - SQLite-backed music library with background scanner
-- Play queue with shuffle and repeat (none / one / all)
-- Mini/compact mode (480×72 strip)
-- MPRIS (`org.mpris.MediaPlayer2`) for media-key and D-Bus control
+- Play queue with shuffle and repeat (none / one / all); shows title, artist, and duration from library
+- Session persistence — queue, shuffle, and repeat state survive restarts
+- M3U / M3U8 playlist support in headless mode (`--no-gui`)
+- Mini/compact mode (480×72 strip) with progress bar
+- MPRIS (`org.mpris.MediaPlayer2`) — playback, volume, shuffle, loop status all wired; `playerctl` and status-bar applets work
 - Wayland-native — no X11, no GPU driver stack (wl_shm software render)
 
 ## Keyboard shortcuts
@@ -33,6 +35,8 @@ Bare-metal ALSA-direct playback. No sound server in the audio path, no resamplin
 | + / = | Volume +5% |
 | − | Volume −5% |
 | M | Toggle mute |
+| S | Toggle shuffle |
+| R | Cycle repeat mode (off → track → playlist) |
 | F1–F4 | Switch view (Main / Library / Pipeline / Queue) |
 | Tab | Cycle views |
 
