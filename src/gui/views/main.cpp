@@ -345,6 +345,15 @@ void draw_main_view(AppState& st) {
         }
     }
 
+    // Gapless "next up" hint when a preload is staged.
+    if (!st.pending_preload_path.empty()) {
+        const auto stem = st.pending_preload_path.stem().string();
+        ImGui::TextColored(kMuted, "\xe2\x8f\xad  %s", stem.c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("gapless preloaded: %s",
+                              st.pending_preload_path.c_str());
+    }
+
     // Time / progress
     const std::int64_t total_ms = snap.source.duration.count();
     std::int64_t elapsed_ms = 0;
