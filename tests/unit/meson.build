@@ -191,3 +191,10 @@ test_loopback_byte_compare = executable(
   dependencies : [doctest_dep],
 )
 test('loopback_byte_compare', test_loopback_byte_compare)
+
+test_queue_ops = executable(
+  'test_queue_ops',
+  'queue_ops.cpp',
+  dependencies : [gui_dep, engine_dep, imgui_dep, doctest_dep],
+)
+test('queue_ops', test_queue_ops)
