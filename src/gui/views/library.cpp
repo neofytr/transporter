@@ -262,6 +262,7 @@ void draw_library_view(AppState& st) {
         if (!st.selected_artist.empty()) {
             if (auto albs = st.library_->albums(st.selected_artist); albs) {
                 for (const auto& al : *albs) {
+                    ImGui::PushID(static_cast<int>(al.id));
                     const bool sel = (al.id == st.selected_album_id);
                     char hdr[128];
                     std::snprintf(hdr, sizeof(hdr), "%s  (%lld track%s)%s",
@@ -343,7 +344,7 @@ void draw_library_view(AppState& st) {
                             }
                         }
                     }
-                    if (ImGui::BeginPopupContextItem(hdr)) {
+                    if (ImGui::BeginPopupContextItem("##album_ctx")) {
                         if (ImGui::MenuItem("Play album")) {
                             if (tracks && !tracks->empty()) {
                                 play_album(st, *tracks, 0);
@@ -358,6 +359,7 @@ void draw_library_view(AppState& st) {
                         }
                         ImGui::EndPopup();
                     }
+                    ImGui::PopID();
                 }
             }
         } else {

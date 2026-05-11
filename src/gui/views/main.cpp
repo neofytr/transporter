@@ -93,12 +93,13 @@ struct SpectrumState {
 
             float mag = 0.0f;
             for (int k = bin_lo; k < bin_hi; ++k)
-                mag = std::max(mag, std::abs(cx[k]));
+                mag = std::max(mag, std::abs(cx[static_cast<std::size_t>(k)]));
             float db = mag > 0.0f ? 20.0f * std::log10(mag / static_cast<float>(FFT_N / 2)) : -90.0f;
             float norm = std::clamp((db + 90.0f) / 90.0f, 0.0f, 1.0f);
-            magnitudes[b] = norm > magnitudes[b] ? norm : magnitudes[b] * 0.85f;
-            if (norm >= peaks[b]) peaks[b] = norm;
-            else peaks[b] = std::max(0.0f, peaks[b] - 0.01f);
+            const auto bi = static_cast<std::size_t>(b);
+            magnitudes[bi] = norm > magnitudes[bi] ? norm : magnitudes[bi] * 0.85f;
+            if (norm >= peaks[bi]) peaks[bi] = norm;
+            else peaks[bi] = std::max(0.0f, peaks[bi] - 0.01f);
         }
     }
 };
@@ -429,7 +430,7 @@ void draw_main_view(AppState& st) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("ring buffer %.0f%% full  (%zu / %zu bytes)",
-                              ring_fill * 100.0f,
+                              static_cast<double>(ring_fill) * 100.0,
                               snap.ring.fill_bytes,
                               snap.ring.capacity_bytes);
         }
@@ -464,10 +465,11 @@ void draw_main_view(AppState& st) {
         constexpr ImU32 kPeakCol = IM_COL32(200, 240, 200, 180);
 
         for (int b = 0; b < SpectrumState::BARS; ++b) {
-            const float x0 = canvas_pos.x + b * bar_w + 1.0f;
-            const float x1 = canvas_pos.x + (b + 1) * bar_w - 1.0f;
-            const float mag = g_spectrum.magnitudes[b];
-            const float pk  = g_spectrum.peaks[b];
+            const auto bi = static_cast<std::size_t>(b);
+            const float x0 = canvas_pos.x + static_cast<float>(b) * bar_w + 1.0f;
+            const float x1 = canvas_pos.x + static_cast<float>(b + 1) * bar_w - 1.0f;
+            const float mag = g_spectrum.magnitudes[bi];
+            const float pk  = g_spectrum.peaks[bi];
             const float bot = canvas_pos.y + bar_h_max;
             const float top = canvas_pos.y + bar_h_max * (1.0f - mag);
             if (top < bot)
@@ -529,6 +531,7 @@ void draw_main_view(AppState& st) {
             if (auto prev = st.queue_previous(); prev) {
                 (void)st.engine_->load(*prev);
                 (void)st.engine_->play();
+                if (st.dbus_) st.dbus_->notify_track_loaded();
             }
         }
     }
@@ -538,6 +541,7 @@ void draw_main_view(AppState& st) {
             if (auto next = st.queue_next(); next) {
                 (void)st.engine_->load(*next);
                 (void)st.engine_->play();
+                if (st.dbus_) st.dbus_->notify_track_loaded();
             }
         }
     }
@@ -626,8 +630,8 @@ void draw_main_view(AppState& st) {
             if (vol.has_db_scale) {
                 ImGui::SameLine();
                 ImGui::TextColored(kMuted, "HW  %.0f..%.0f dB",
-                    static_cast<float>(vol.min_db_x100) / 100.0f,
-                    static_cast<float>(vol.max_db_x100) / 100.0f);
+                    static_cast<double>(vol.min_db_x100) / 100.0,
+                    static_cast<double>(vol.max_db_x100) / 100.0);
             }
         } else if (!hw_string.empty()) {
             ImGui::TextColored(kMuted, "Vol: no HW control — use alsamixer");
@@ -687,11 +691,19 @@ void draw_mini_view(AppState& st) {
         if (ImGui::SmallButton("\xe2\x8f\xb9")) { (void)st.engine_->stop(); }
         ImGui::SameLine();
         if (ImGui::SmallButton("\xe2\x8f\xae")) {
-            if (auto p = st.queue_previous(); p) { (void)st.engine_->load(*p); (void)st.engine_->play(); }
+            if (auto p = st.queue_previous(); p) {
+                (void)st.engine_->load(*p);
+                (void)st.engine_->play();
+                if (st.dbus_) st.dbus_->notify_track_loaded();
+            }
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("\xe2\x8f\xad")) {
-            if (auto n = st.queue_next(); n) { (void)st.engine_->load(*n); (void)st.engine_->play(); }
+            if (auto n = st.queue_next(); n) {
+                (void)st.engine_->load(*n);
+                (void)st.engine_->play();
+                if (st.dbus_) st.dbus_->notify_track_loaded();
+            }
         }
         ImGui::SameLine();
         verdict_badge(snap);
