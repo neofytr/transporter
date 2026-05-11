@@ -1168,7 +1168,7 @@ int run_headless(const AppArgs& args) {
             if (use_playlist) {
                 const int next = playlist_pos.fetch_add(1) + 1;
                 if (next < static_cast<int>(playlist.size())) {
-                    (void)st.engine_->load(playlist[next]);
+                    (void)st.engine_->load(playlist[static_cast<std::size_t>(next)]);
                     (void)st.engine_->play();
                 } else {
                     done.store(true);
