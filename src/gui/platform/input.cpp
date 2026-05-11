@@ -95,9 +95,7 @@ void pointer_button(void* data, wl_pointer* /*p*/, uint32_t /*serial*/,
     default: return;
     }
     w.mouse_buttons[idx] = (state == WL_POINTER_BUTTON_STATE_PRESSED);
-    if (idx >= 0) {
-        ImGui::GetIO().AddMouseButtonEvent(idx, w.mouse_buttons[idx]);
-    }
+    ImGui::GetIO().AddMouseButtonEvent(idx, w.mouse_buttons[idx]);
 }
 
 void pointer_axis(void* /*data*/, wl_pointer* /*p*/, uint32_t /*time*/,
@@ -115,6 +113,8 @@ void pointer_frame(void* /*data*/, wl_pointer* /*p*/) {}
 void pointer_axis_source(void* /*data*/, wl_pointer* /*p*/, uint32_t /*src*/) {}
 void pointer_axis_stop(void* /*data*/, wl_pointer* /*p*/, uint32_t /*time*/, uint32_t /*axis*/) {}
 void pointer_axis_discrete(void* /*data*/, wl_pointer* /*p*/, uint32_t /*axis*/, int32_t /*disc*/) {}
+void pointer_axis_value120(void* /*data*/, wl_pointer* /*p*/, uint32_t /*axis*/, int32_t /*v120*/) {}
+void pointer_axis_relative_direction(void* /*data*/, wl_pointer* /*p*/, uint32_t /*axis*/, uint32_t /*dir*/) {}
 
 constexpr wl_pointer_listener kPointerListener = {
     .enter = pointer_enter,
@@ -126,6 +126,8 @@ constexpr wl_pointer_listener kPointerListener = {
     .axis_source = pointer_axis_source,
     .axis_stop = pointer_axis_stop,
     .axis_discrete = pointer_axis_discrete,
+    .axis_value120 = pointer_axis_value120,
+    .axis_relative_direction = pointer_axis_relative_direction,
 };
 
 // keyboard
