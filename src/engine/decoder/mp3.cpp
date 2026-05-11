@@ -85,6 +85,8 @@ void slurp_id3v2(const mpg123_id3v2* v2, Tags& out) {
         const std::string_view id{t.id, 4};
         if (id == "TRCK") {
             out.track_no = take(&t.text);
+        } else if (id == "TPOS") {
+            out.disc_no = take(&t.text);
         } else if (id == "TPE2") {
             out.album_artist = take(&t.text);
         } else if (out.date.empty() && (id == "TYER" || id == "TDRC")) {

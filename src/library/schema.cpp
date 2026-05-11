@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     album            TEXT    NOT NULL DEFAULT '',
     album_artist     TEXT    NOT NULL DEFAULT '',
     track_no         TEXT    NOT NULL DEFAULT '',
+    disc_no          TEXT    NOT NULL DEFAULT '',
     date             TEXT    NOT NULL DEFAULT '',
     codec            TEXT    NOT NULL DEFAULT '',
     sample_rate_hz   INTEGER NOT NULL DEFAULT 0,
@@ -158,6 +159,10 @@ record_migration(Db& db, int version) {
     return {};
 }
 
+// Migration 2: add disc_no column to tracks.
+constexpr std::string_view migration_002 =
+    "ALTER TABLE tracks ADD COLUMN disc_no TEXT NOT NULL DEFAULT ''";
+
 } // namespace
 
 std::expected<int, transporter::engine::Error> apply_migrations(Db& db) {
@@ -175,6 +180,16 @@ std::expected<int, transporter::engine::Error> apply_migrations(Db& db) {
             return std::unexpected(e.error());
         }
         version = 1;
+    }
+
+    if (version < 2) {
+        if (auto e = db.exec(migration_002); !e) {
+            return std::unexpected(e.error());
+        }
+        if (auto e = record_migration(db, 2); !e) {
+            return std::unexpected(e.error());
+        }
+        version = 2;
     }
 
     return version;

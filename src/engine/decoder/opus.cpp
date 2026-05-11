@@ -78,6 +78,8 @@ void parse_opus_tags(const OpusTags* tags, Tags& out) {
             out.title.assign(val);
         } else if (keylc == "tracknumber" || keylc == "track") {
             out.track_no.assign(val);
+        } else if (keylc == "discnumber" || keylc == "disc") {
+            out.disc_no.assign(val);
         } else if (keylc == "date" || keylc == "year") {
             out.date.assign(val);
         } else if (keylc == "replaygain_track_gain") {

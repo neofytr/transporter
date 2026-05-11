@@ -447,16 +447,17 @@ void Scanner::walk_root(Db& db, const fs::path& root,
             bind_text(*stmt, 4,  tags.album);
             bind_text(*stmt, 5,  album_artist);
             bind_text(*stmt, 6,  tags.track_no);
-            bind_text(*stmt, 7,  tags.date);
-            bind_text(*stmt, 8,  codec);
-            sqlite3_bind_int (*stmt, 9,  static_cast<int>(fmt.sample_rate_hz));
-            sqlite3_bind_int (*stmt, 10, static_cast<int>(fmt.channels));
-            sqlite3_bind_int (*stmt, 11, static_cast<int>(bd));
-            sqlite3_bind_int64(*stmt, 12, static_cast<std::int64_t>(total_frames));
-            sqlite3_bind_int64(*stmt, 13, duration_ms);
-            sqlite3_bind_int64(*stmt, 14, si.size);
-            sqlite3_bind_int64(*stmt, 15, si.mtime_ns);
-            sqlite3_bind_int64(*stmt, 16, now_unix_ns());
+            bind_text(*stmt, 7,  tags.disc_no);
+            bind_text(*stmt, 8,  tags.date);
+            bind_text(*stmt, 9,  codec);
+            sqlite3_bind_int (*stmt, 10, static_cast<int>(fmt.sample_rate_hz));
+            sqlite3_bind_int (*stmt, 11, static_cast<int>(fmt.channels));
+            sqlite3_bind_int (*stmt, 12, static_cast<int>(bd));
+            sqlite3_bind_int64(*stmt, 13, static_cast<std::int64_t>(total_frames));
+            sqlite3_bind_int64(*stmt, 14, duration_ms);
+            sqlite3_bind_int64(*stmt, 15, si.size);
+            sqlite3_bind_int64(*stmt, 16, si.mtime_ns);
+            sqlite3_bind_int64(*stmt, 17, now_unix_ns());
 
             if (sqlite3_step(*stmt) == SQLITE_ROW) {
                 track_id = sqlite3_column_int64(*stmt, 0);

@@ -14,26 +14,26 @@ inline constexpr std::string_view select_track_by_path =
     "SELECT id, mtime_unix_ns, file_size FROM tracks WHERE path = ?1";
 
 inline constexpr std::string_view select_track_by_id =
-    "SELECT id, path, title, artist, album, album_artist, track_no, date, "
-    "codec, sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
-    "file_size, mtime_unix_ns FROM tracks WHERE id = ?1";
+    "SELECT id, path, title, artist, album, album_artist, track_no, disc_no, "
+    "date, codec, sample_rate_hz, channels, bit_depth, total_frames, "
+    "duration_ms, file_size, mtime_unix_ns FROM tracks WHERE id = ?1";
 
 inline constexpr std::string_view select_full_track_by_path =
-    "SELECT id, path, title, artist, album, album_artist, track_no, date, "
-    "codec, sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
-    "file_size, mtime_unix_ns FROM tracks WHERE path = ?1";
+    "SELECT id, path, title, artist, album, album_artist, track_no, disc_no, "
+    "date, codec, sample_rate_hz, channels, bit_depth, total_frames, "
+    "duration_ms, file_size, mtime_unix_ns FROM tracks WHERE path = ?1";
 
 inline constexpr std::string_view upsert_track =
     "INSERT INTO tracks "
-    "(path, title, artist, album, album_artist, track_no, date, codec, "
-    " sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
+    "(path, title, artist, album, album_artist, track_no, disc_no, date, "
+    " codec, sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
     " file_size, mtime_unix_ns, added_at_unix_ns) "
     "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, "
-    "        ?14, ?15, ?16) "
+    "        ?14, ?15, ?16, ?17) "
     "ON CONFLICT(path) DO UPDATE SET "
     "  title=excluded.title, artist=excluded.artist, album=excluded.album, "
     "  album_artist=excluded.album_artist, track_no=excluded.track_no, "
-    "  date=excluded.date, codec=excluded.codec, "
+    "  disc_no=excluded.disc_no, date=excluded.date, codec=excluded.codec, "
     "  sample_rate_hz=excluded.sample_rate_hz, channels=excluded.channels, "
     "  bit_depth=excluded.bit_depth, total_frames=excluded.total_frames, "
     "  duration_ms=excluded.duration_ms, file_size=excluded.file_size, "
@@ -90,12 +90,14 @@ inline constexpr std::string_view select_albums_by_artist =
 
 inline constexpr std::string_view select_tracks_in_album =
     "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, "
-    "       t.track_no, t.date, t.codec, t.sample_rate_hz, t.channels, "
-    "       t.bit_depth, t.total_frames, t.duration_ms, t.file_size, "
-    "       t.mtime_unix_ns "
+    "       t.track_no, t.disc_no, t.date, t.codec, t.sample_rate_hz, "
+    "       t.channels, t.bit_depth, t.total_frames, t.duration_ms, "
+    "       t.file_size, t.mtime_unix_ns "
     "FROM tracks t JOIN track_album ta ON ta.track_id = t.id "
     "WHERE ta.album_id = ?1 "
-    "ORDER BY CAST(t.track_no AS INTEGER) ASC, t.title COLLATE NOCASE ASC";
+    "ORDER BY CAST(t.disc_no AS INTEGER) ASC, "
+    "         CAST(t.track_no AS INTEGER) ASC, "
+    "         t.title COLLATE NOCASE ASC";
 
 // Search builders. The library composes the WHERE clause and ORDER BY at
 // runtime from the SearchFilter; see search.cpp comments for the rule.

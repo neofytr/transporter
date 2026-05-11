@@ -54,15 +54,16 @@ Track row_to_track(sqlite3_stmt* stmt) {
     t.album           = column_text(stmt, 4);
     t.album_artist    = column_text(stmt, 5);
     t.track_no        = column_text(stmt, 6);
-    t.date            = column_text(stmt, 7);
-    t.codec           = column_text(stmt, 8);
-    t.sample_rate_hz  = static_cast<std::uint32_t>(sqlite3_column_int(stmt, 9));
-    t.channels        = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 10));
-    t.bit_depth       = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 11));
-    t.total_frames    = static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 12));
-    t.duration        = std::chrono::milliseconds{sqlite3_column_int64(stmt, 13)};
-    t.file_size_bytes = sqlite3_column_int64(stmt, 14);
-    t.mtime_unix_ns   = sqlite3_column_int64(stmt, 15);
+    t.disc_no         = column_text(stmt, 7);
+    t.date            = column_text(stmt, 8);
+    t.codec           = column_text(stmt, 9);
+    t.sample_rate_hz  = static_cast<std::uint32_t>(sqlite3_column_int(stmt, 10));
+    t.channels        = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 11));
+    t.bit_depth       = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 12));
+    t.total_frames    = static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 13));
+    t.duration        = std::chrono::milliseconds{sqlite3_column_int64(stmt, 14)};
+    t.file_size_bytes = sqlite3_column_int64(stmt, 15);
+    t.mtime_unix_ns   = sqlite3_column_int64(stmt, 16);
     return t;
 }
 
@@ -228,7 +229,7 @@ Library::search(const SearchFilter& filter) const {
 
     std::string sql =
         "SELECT id, path, title, artist, album, album_artist, track_no, "
-        "       date, codec, sample_rate_hz, channels, bit_depth, "
+        "       disc_no, date, codec, sample_rate_hz, channels, bit_depth, "
         "       total_frames, duration_ms, file_size, mtime_unix_ns, "
         "       added_at_unix_ns "
         "FROM tracks";

@@ -98,6 +98,8 @@ void parse_vorbis_comment(const FLAC__StreamMetadata_VorbisComment& vc, Tags& ou
             out.title.assign(val);
         } else if (keylc == "tracknumber" || keylc == "track") {
             out.track_no.assign(val);
+        } else if (keylc == "discnumber" || keylc == "disc") {
+            out.disc_no.assign(val);
         } else if (keylc == "date" || keylc == "year") {
             out.date.assign(val);
         } else if (keylc == "replaygain_track_gain") {

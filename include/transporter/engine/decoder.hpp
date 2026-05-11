@@ -25,6 +25,7 @@ struct Tags {
     std::string album;
     std::string title;
     std::string track_no;
+    std::string disc_no;  // DISCNUMBER / TPOS; empty when absent
     std::string date;
 
     // ReplayGain from file tags — read-only display; not applied to audio path.
