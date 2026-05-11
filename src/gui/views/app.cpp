@@ -281,47 +281,66 @@ void AppState::queue_remove(std::int32_t idx) {
     recompute_queue_duration();
 }
 
+void AppState::refresh_preload() {
+    if (engine_ == nullptr) return;
+    engine_->cancel_preload();
+    pending_preload_path.clear();
+    if (auto peek = queue_peek_next(); peek) {
+        pending_preload_path = *peek;
+        (void)engine_->preload(*peek);
+    }
+}
+
 void AppState::queue_move(std::int32_t from_idx, std::int32_t to_idx) {
-    std::lock_guard lk(queue_mtx);
-    const auto n = static_cast<std::int32_t>(queue.size());
-    if (from_idx < 0 || from_idx >= n || to_idx < 0 || to_idx >= n) {
-        return;
+    {
+        std::lock_guard lk(queue_mtx);
+        const auto n = static_cast<std::int32_t>(queue.size());
+        if (from_idx < 0 || from_idx >= n || to_idx < 0 || to_idx >= n) {
+            return;
+        }
+        std::swap(queue[static_cast<std::size_t>(from_idx)],
+                  queue[static_cast<std::size_t>(to_idx)]);
+        if (queue_index == from_idx) {
+            queue_index = to_idx;
+        } else if (queue_index == to_idx) {
+            queue_index = from_idx;
+        }
     }
-    std::swap(queue[static_cast<std::size_t>(from_idx)],
-              queue[static_cast<std::size_t>(to_idx)]);
-    if (queue_index == from_idx) {
-        queue_index = to_idx;
-    } else if (queue_index == to_idx) {
-        queue_index = from_idx;
-    }
+    refresh_preload();
 }
 
 void AppState::queue_move_to_top(std::int32_t idx) {
-    std::lock_guard lk(queue_mtx);
-    const auto n = static_cast<std::int32_t>(queue.size());
-    if (idx <= 0 || idx >= n) {
-        return;
+    {
+        std::lock_guard lk(queue_mtx);
+        const auto n = static_cast<std::int32_t>(queue.size());
+        if (idx <= 0 || idx >= n) {
+            return;
+        }
+        std::rotate(queue.begin(), queue.begin() + idx, queue.begin() + idx + 1);
+        if (queue_index == idx) {
+            queue_index = 0;
+        } else if (queue_index < idx) {
+            ++queue_index;
+        }
     }
-    std::rotate(queue.begin(), queue.begin() + idx, queue.begin() + idx + 1);
-    if (queue_index == idx) {
-        queue_index = 0;
-    } else if (queue_index < idx) {
-        ++queue_index;
-    }
+    refresh_preload();
 }
 
 void AppState::queue_move_to_bottom(std::int32_t idx) {
-    std::lock_guard lk(queue_mtx);
-    const auto n = static_cast<std::int32_t>(queue.size());
-    if (idx < 0 || idx >= n - 1) {
-        return;
+    {
+        std::lock_guard lk(queue_mtx);
+        const auto n = static_cast<std::int32_t>(queue.size());
+        if (idx < 0 || idx >= n - 1) {
+            return;
+        }
+        std::rotate(queue.begin() + idx, queue.begin() + idx + 1, queue.end());
+        if (queue_index == idx) {
+            queue_index = n - 1;
+        } else if (queue_index > idx) {
+            --queue_index;
+        }
     }
-    std::rotate(queue.begin() + idx, queue.begin() + idx + 1, queue.end());
-    if (queue_index == idx) {
-        queue_index = n - 1;
-    } else if (queue_index > idx) {
-        --queue_index;
-    }
+    refresh_preload();
 }
 
 void AppState::queue_clear() {

@@ -124,6 +124,8 @@ struct AppState {
     void queue_clear();
     void queue_shuffle_toggle();
 
+    void refresh_preload();
+
     // Recomputes queue_total_duration from library metadata.
     // Safe to call from any thread. No-op if library_ is null.
     void recompute_queue_duration();
