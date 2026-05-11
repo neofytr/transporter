@@ -615,11 +615,13 @@ void draw_main_view(AppState& st) {
             if (ImGui::SliderInt("##vol", &pct, 0, 100, "%d%%")) {
                 st.hw_volume_pct = pct;
                 engine::set_hw_volume_pct(hw_string, pct);
+                if (st.dbus_) { st.dbus_->notify_volume_changed(); }
             }
             ImGui::SameLine();
             if (ImGui::Button("Mute")) {
                 engine::toggle_hw_mute(hw_string);
                 st.hw_volume_last_poll = {};
+                if (st.dbus_) { st.dbus_->notify_volume_changed(); }
             }
             if (vol.has_db_scale) {
                 ImGui::SameLine();
