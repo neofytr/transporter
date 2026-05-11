@@ -47,6 +47,7 @@ gui_sources = files(
   'views/albumart.cpp',
   'views/pipeline.cpp',
   'views/queue.cpp',
+  'views/lyrics.cpp',
 )
 
 gui_lib = static_library(

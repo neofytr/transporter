@@ -4,6 +4,7 @@
 // indicator. Empty state is the locked first-run UX.
 
 #include "app.hpp"
+#include "lyrics.hpp"
 #include "spectrum.hpp"
 
 #include <transporter/engine/device.hpp>
@@ -383,6 +384,33 @@ void draw_main_view(AppState& st) {
                 dl->AddLine({x0, pk_y}, {x1, pk_y}, kPeakCol);
         }
         ImGui::Dummy({bar_total_w, bar_h_max + 2.0f});
+    }
+
+    // Lyrics — load on track change, display current line.
+    {
+        const std::filesystem::path cur_path{snap.source.file_path};
+        if (cur_path != st.lyrics_loaded_for) {
+            st.lyrics_loaded_for = cur_path;
+            st.lyrics = cur_path.empty() ? Lyrics{} : load_lyrics(cur_path);
+        }
+        if (st.lyrics.loaded) {
+            const int li = current_lyric_line(st.lyrics, elapsed_ms);
+            ImGui::Spacing();
+            if (ImGui::CollapsingHeader("Lyrics", ImGuiTreeNodeFlags_DefaultOpen)) {
+                const ImVec2 avail = ImGui::GetContentRegionAvail();
+                ImGui::BeginChild("##lyrics", ImVec2(0, std::min(avail.y, 120.0f)),
+                                  ImGuiChildFlags_Border);
+                constexpr ImVec4 kActive{0.95f, 0.95f, 0.95f, 1.0f};
+                constexpr ImVec4 kDim{0.55f, 0.55f, 0.60f, 1.0f};
+                for (int i = 0; i < static_cast<int>(st.lyrics.lines.size()); ++i) {
+                    const bool active = (i == li);
+                    ImGui::TextColored(active ? kActive : kDim,
+                                       "%s", st.lyrics.lines[static_cast<std::size_t>(i)].text.c_str());
+                    if (active) ImGui::SetScrollHereY(0.5f);
+                }
+                ImGui::EndChild();
+            }
+        }
     }
 
     ImGui::Spacing();

@@ -8,6 +8,8 @@
 #include <transporter/engine/engine.hpp>
 #include <transporter/library/library.hpp>
 
+#include "lyrics.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -100,6 +102,9 @@ struct AppState {
     void queue_set_single(std::filesystem::path p);
     // Returns the path after the current index without advancing it.
     std::optional<std::filesystem::path> queue_peek_next() const;
+
+    Lyrics lyrics;
+    std::filesystem::path lyrics_loaded_for;
 
     void queue_append(std::filesystem::path p);
     bool queue_jump_to(std::int32_t idx);
