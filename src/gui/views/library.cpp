@@ -136,10 +136,18 @@ void play_album(AppState& st, const std::vector<library::Track>& album_tracks,
 } // namespace
 
 void draw_library_view(AppState& st) {
-    if (st.library_ == nullptr) {
-        ImGui::TextDisabled("library not configured");
-        ImGui::TextColored(kMuted,
-                           "Add a [library].roots entry in your config and restart.");
+    if (st.library_ == nullptr || st.cfg.library.roots.empty()) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("no library configured");
+        ImGui::Spacing();
+        ImGui::TextColored(kMuted, "Add a [library].roots path to your config:");
+        ImGui::Spacing();
+        ImGui::Indent(16.0f);
+        ImGui::TextColored(kMuted, "~/.config/transporter/config.toml");
+        ImGui::Spacing();
+        ImGui::TextColored(kMuted, "  [library]");
+        ImGui::TextColored(kMuted, "  roots = [\"/home/you/Music\"]");
+        ImGui::Unindent(16.0f);
         return;
     }
 
@@ -282,12 +290,20 @@ void draw_library_view(AppState& st) {
 
     // Status line
     ImGui::Separator();
-    const auto p = st.library_->progress();
-    if (p.state == library::ScanState::Idle && st.library_status.empty()) {
-        ImGui::TextColored(kMuted,
-                           "library: idle  -  add roots to "
-                           "~/.config/transporter/config.toml and restart");
+    if (!st.library_status.empty()) {
+        int done = 0, total = 0;
+        if (std::sscanf(st.library_status.c_str(), "scanning... %d / %d", &done, &total) == 2
+                && total > 0) {
+            const float frac = std::clamp(static_cast<float>(done) / static_cast<float>(total),
+                                          0.0f, 1.0f);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 6.0f), "");
+            ImGui::TextColored(kMuted, "%d / %d tracks indexed", done, total);
+        } else {
+            ImGui::TextColored(kMuted, "%s", st.library_status.c_str());
+        }
     } else {
+        const auto p = st.library_->progress();
         char buf2[128];
         std::snprintf(buf2, sizeof(buf2),
                       "%s... seen=%zu indexed=%zu deleted=%zu",
