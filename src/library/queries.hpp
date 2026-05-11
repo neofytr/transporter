@@ -10,11 +10,6 @@ namespace transporter::library::queries {
 // All SQL strings in one place so they're reviewable. No string concatenation
 // for parameters anywhere; bind always.
 
-inline constexpr std::string_view track_select_columns =
-    "id, path, title, artist, album, album_artist, track_no, date, codec, "
-    "sample_rate_hz, channels, bit_depth, total_frames, duration_ms, "
-    "file_size, mtime_unix_ns";
-
 inline constexpr std::string_view select_track_by_path =
     "SELECT id, mtime_unix_ns, file_size FROM tracks WHERE path = ?1";
 
@@ -105,13 +100,6 @@ inline constexpr std::string_view select_tracks_in_album =
 // Search builders. The library composes the WHERE clause and ORDER BY at
 // runtime from the SearchFilter; see search.cpp comments for the rule.
 // The base query selects the same columns as select_track_by_id.
-
-inline constexpr std::string_view fts_insert =
-    "INSERT INTO tracks_fts (rowid, title, artist, album, album_artist) "
-    "VALUES (?1, ?2, ?3, ?4, ?5)";
-
-inline constexpr std::string_view fts_delete =
-    "DELETE FROM tracks_fts WHERE rowid = ?1";
 
 inline constexpr std::string_view begin_immediate = "BEGIN IMMEDIATE";
 inline constexpr std::string_view commit          = "COMMIT";
