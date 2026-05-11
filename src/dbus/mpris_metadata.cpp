@@ -8,6 +8,7 @@
 
 #include <sdbus-c++/sdbus-c++.h>
 
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
@@ -20,6 +21,24 @@
 namespace transporter::dbus_svc {
 
 namespace {
+
+// Probe common cover-art filenames in the directory of an audio file.
+// Returns a file:// URI on the first hit, or empty string.
+std::string find_art_uri(const std::string& file_path) {
+    if (file_path.empty()) return {};
+    const std::filesystem::path dir{file_path};
+    static constexpr std::array kNames = {
+        "cover.jpg", "cover.png", "folder.jpg", "folder.png",
+        "front.jpg", "front.png", "album.jpg",  "album.png",
+    };
+    for (const char* name : kNames) {
+        std::error_code ec;
+        const auto p = dir.parent_path() / name;
+        if (std::filesystem::exists(p, ec) && !ec)
+            return "file://" + p.string();
+    }
+    return {};
+}
 
 std::string to_file_uri(const std::string& path) {
     if (path.empty()) {
@@ -114,6 +133,9 @@ mpris_metadata_from_parts(const std::string& file_path,
     }
     if (!file_path.empty()) {
         out.emplace("xesam:url", sdbus::Variant{to_file_uri(file_path)});
+    }
+    if (auto art = find_art_uri(file_path); !art.empty()) {
+        out.emplace("mpris:artUrl", sdbus::Variant{art});
     }
     if (!tags.date.empty()) {
         out.emplace("xesam:contentCreated", sdbus::Variant{tags.date});
