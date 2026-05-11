@@ -202,59 +202,61 @@ int main(int argc, char** argv) {
         return fail("track-ended-event");
     }
 
-    // Gapless preload: load track, immediately preload the same file
-    // (same format guarantees a gapless swap at EOF). The decoder thread
-    // should swap in the preloaded decoder and emit TrackLoaded, not
-    // TrackEnded. State stays Playing after the swap.
+    // Gapless preload: dedicated engine with a 16384-byte ring (one MAX_FRAMES
+    // batch for S16 stereo). The decoder blocks after its first read, so the
+    // Preload command is guaranteed to be staged before EOF.
     {
-        std::lock_guard lk(log.mtx);
-        log.kinds.clear();
-        log.states.clear();
-    }
-    if (!engine.load(argv[1])) {
-        return fail("gapless-load");
-    }
-    // Stage the preload immediately — before the decoder can reach EOF.
-    // The mock output's 1 ms/write throttle gives ~172 ms of headroom for
-    // a 2-second fixture, so this call is well within the window.
-    if (!engine.preload(argv[1])) {
-        return fail("gapless-preload");
-    }
-    // Now wait for Playing (engine may still be Loading).
-    if (!log.wait_state(tp::State::Playing, 2s)) {
-        return fail("gapless-wait-playing");
-    }
-    // Clear the log so we only see events after the initial TrackLoaded.
-    {
-        std::lock_guard lk(log.mtx);
-        log.kinds.clear();
-        log.states.clear();
-    }
-    // Wait for the gapless swap to fire a second TrackLoaded. Give ample
-    // time: 2 s fixture × mock drain rate.
-    {
-        std::unique_lock lk(log.mtx);
-        const bool got = log.cv.wait_for(lk, 6s, [&] {
-            for (auto k : log.kinds) {
-                if (k == tp::Event::Kind::TrackLoaded) {
-                    return true;
+        EventLog glog;
+        tp::EngineConfig gcfg;
+        gcfg.ring_capacity_bytes = 1u << 14; // 16384 = MAX_FRAMES(4096) * frame_bytes(4)
+        auto ge_or = tp::EngineTestHooks::create_with_device(
+            std::move(gcfg), std::make_unique<MockDevice>());
+        if (!ge_or) {
+            return fail("gapless-create");
+        }
+        auto& gengine = **ge_or;
+        gengine.set_event_callback([&](const tp::Event& ev) { glog.on(ev); });
+
+        if (!gengine.load(argv[1])) {
+            return fail("gapless-load");
+        }
+        if (!gengine.preload(argv[1])) {
+            return fail("gapless-preload");
+        }
+        if (!glog.wait_state(tp::State::Playing, 2s)) {
+            return fail("gapless-wait-playing");
+        }
+        {
+            std::lock_guard lk(glog.mtx);
+            glog.kinds.clear();
+            glog.states.clear();
+        }
+        // 352 KB fixture with 16 KB ring drains in ~88 ms; second track adds
+        // another ~88 ms. 10 s is ample.
+        {
+            std::unique_lock lk(glog.mtx);
+            const bool got = glog.cv.wait_for(lk, 10s, [&] {
+                for (auto k : glog.kinds) {
+                    if (k == tp::Event::Kind::TrackLoaded) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            if (!got) {
+                return fail("gapless-track-loaded-event");
+            }
+            for (auto k : glog.kinds) {
+                if (k == tp::Event::Kind::TrackEnded) {
+                    return fail("gapless-spurious-track-ended");
                 }
             }
-            return false;
-        });
-        if (!got) {
-            return fail("gapless-track-loaded-event");
         }
-        for (auto k : log.kinds) {
-            if (k == tp::Event::Kind::TrackEnded) {
-                return fail("gapless-spurious-track-ended");
-            }
+        std::this_thread::sleep_for(20ms);
+        if (gengine.state() == tp::State::Idle || gengine.state() == tp::State::Stopped) {
+            return fail("gapless-state-not-playing");
         }
-    }
-    // Engine should still be playing (not stopped/idle) after the swap.
-    std::this_thread::sleep_for(20ms);
-    if (engine.state() == tp::State::Idle || engine.state() == tp::State::Stopped) {
-        return fail("gapless-state-not-playing");
+        gengine.set_event_callback({});
     }
 
     std::printf("ok engine_fsm\n");

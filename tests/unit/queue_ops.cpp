@@ -193,6 +193,14 @@ TEST_CASE("queue_next: repeat-one returns current, does not advance index") {
     CHECK(st.queue_index == 1); // unchanged
 }
 
+TEST_CASE("queue_peek_next: returns nullopt in shuffle mode (next is unpredictable)") {
+    transporter::gui::AppState st;
+    fill(st, {"/a", "/b", "/c"}, 0); // a is current
+    st.shuffle = true;
+    st.repeat_mode = transporter::gui::AppState::RepeatMode::All;
+    CHECK(!st.queue_peek_next().has_value());
+}
+
 TEST_CASE("queue_move: swapping last two elements updates current") {
     transporter::gui::AppState st;
     fill(st, {"/a", "/b", "/c"}, 2); // c is current
