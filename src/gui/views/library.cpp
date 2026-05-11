@@ -176,10 +176,22 @@ void draw_library_view(AppState& st) {
             ImGui::BeginChild("results", ImVec2(0, avail.y - 60),
                               ImGuiChildFlags_Border);
             for (const auto& t : *r) {
+                ImGui::PushID(static_cast<int>(t.id));
                 std::string label = t.artist + " - " + t.title +
                                     " [" + t.album + "]";
                 if (ImGui::Selectable(label.c_str())) {
                     play_track(st, t);
+                }
+                if (t.duration.count() > 0) {
+                    const std::int64_t s = t.duration.count() / 1000;
+                    char dur[20];
+                    std::snprintf(dur, sizeof(dur), "%lld:%02lld",
+                                  static_cast<long long>(s / 60),
+                                  static_cast<long long>(s % 60));
+                    const float dur_w = ImGui::CalcTextSize(dur).x + 4.0f;
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - dur_w);
+                    ImGui::TextColored(kMuted, "%s", dur);
                 }
                 if (ImGui::BeginPopupContextItem()) {
                     if (ImGui::MenuItem("Play now")) {
@@ -193,6 +205,7 @@ void draw_library_view(AppState& st) {
                     }
                     ImGui::EndPopup();
                 }
+                ImGui::PopID();
             }
             ImGui::EndChild();
         } else {
