@@ -228,6 +228,150 @@ Each phase produces something runnable and testable. A phase is "done" when its 
 
 ---
 
+---
+
+## Phase 13a — GPU rendering backend (EGL + OpenGL)
+
+**Goal.** Add an EGL/OpenGL render path as the default; keep the wl_shm CPU path as `--cpu` fallback. GPU enables blur, smooth curves, and proper post-processing for the UI redesign.
+
+**Deliverable.**
+- `src/gui/platform/render_gl.cpp`: EGL init (`wl_egl_window`, `eglCreateWindowSurface`, OpenGL 3.3 context); ImGui `imgui_impl_opengl3` backend wired up
+- `src/gui/platform/render_cpu.cpp`: existing wl_shm path extracted and renamed (no logic change)
+- `IRenderBackend` interface (or simple `RenderMode` enum + conditional compile) allowing Window to use either
+- `--cpu` CLI flag → force CPU path; no flag or `--gpu` → GPU, fall back to CPU silently if EGL init fails
+- Font atlas: GPU path uploads `GL_R8` texture and uses standard ImGui GL pipeline; CPU path unchanged
+- GPU blur post-pass: `src/gui/platform/blur.glsl` — two-pass (H+V) Gaussian; applied to album art region behind track info text (frosted glass effect)
+- Meson: detect `wayland-egl` + `egl` + `gl` via pkg-config; CPU-only build still works without them
+
+**Acceptance.**
+- `./build/transporter` (no flag): opens with GPU renderer; `glGetString(GL_RENDERER)` not "llvmpipe" on a real GPU
+- `./build/transporter --cpu`: opens with software renderer; no EGL calls made
+- GPU path: ImGui text renders cleanly at all sizes; album art displays correctly; frosted blur visible behind track info
+- CPU path: all existing behaviour unchanged
+
+---
+
+## Phase 13 — UI redesign (Apple Music / Tidal aesthetic)
+
+**Goal.** Rebuild the main view into a polished, visually-driven layout with large cover art, dominant-color background tinting, and a waveform-overlaid seekbar.
+
+**Deliverable.**
+- `gui/views/main.cpp`: full-width cover art hero at top; track info (artist / album / title) below in typographic hierarchy; transport controls as Nerd Font icon buttons
+- `gui/util/dominant_color.cpp`: extract dominant RGB from AlbumArt pixels (fast median-cut or k=1 k-means); cache per track
+- Background clear color and ImGui accent colors shift per-album based on dominant color (muted/desaturated for readability)
+- Waveform seekbar replacing the plain progress bar — pre-computed envelope drawn via ImGui draw list; scrub-to-seek on click/drag
+- Library browser: album-grid view with larger cover thumbnails; artist/album/track columns retain list fallback
+- Queue panel as an overlay child window, toggled by button
+
+**Acceptance.**
+- Loading a track with album art: background tints within one frame; cover occupies ≥ 50% of window width
+- Waveform seekbar correctly represents amplitude for a reference FLAC; click seeks to within ±1 s
+- All transport controls functional; Nerd Font icons render correctly (not boxes)
+
+---
+
+## Phase 14 — Disc-number support
+
+**Goal.** Multi-disc albums sort and display correctly.
+
+**Deliverable.**
+- `disc_no TEXT NOT NULL DEFAULT ''` column added to tracks table with migration
+- All decoders (FLAC, MP3/ID3, Vorbis, Opus, AIFF, WAV) read DISCNUMBER / TPOS tag into `TrackInfo::disc_no`
+- `select_tracks_in_album` query updated: `ORDER BY CAST(disc_no AS INTEGER) ASC, CAST(track_no AS INTEGER) ASC`
+- Library browser: disc separator rows shown between disc groups when album has >1 disc
+
+**Acceptance.**
+- A multi-disc FLAC album plays disc 1 track 1, disc 1 track 2, …, disc 2 track 1, … in order
+- Single-disc albums unaffected (`disc_no` defaults to 0/empty, treated as disc 1)
+
+---
+
+## Phase 15 — Software resampler (opt-in per-device)
+
+**Goal.** When a track's native rate is unsupported by the selected DAC, an opt-in libsoxr resampler bridges the gap instead of hard-refusing.
+
+**Deliverable.**
+- libsoxr added as a build dependency (Meson wrap or system pkg)
+- `engine/resample/`: `Resampler` class wrapping `soxr_create` / `soxr_process`; inserted between ring buffer output and ALSA write
+- Per-device settings stored in SQLite (`device_settings` table): `resample_enabled`, `resample_target_rate`
+- Resampler stage added to `PipelineSnapshot` (input rate, output rate, quality mode)
+- Bit-perfect indicator: QUALIFIED when resampler active; tooltip explains rate conversion
+- Settings UI: per-device toggle and target-rate picker in DAC selection panel
+
+**Acceptance.**
+- 192 kHz FLAC played through a 44.1/48 kHz-only DAC with resampler enabled: plays without error; indicator shows QUALIFIED
+- Same file with resampler disabled: hard refusal as before
+- Bit-exact path unchanged: resampler absent from pipeline snapshot when disabled
+
+---
+
+## Phase 16 — Gapless playback (same-rate)
+
+**Goal.** Zero-gap transitions between consecutive tracks at the same sample rate.
+
+**Deliverable.**
+- Engine tracks next-track in queue; begins decoding next file when current track has ≤ 2 s remaining
+- If next track matches current ALSA `hw_params` exactly: write continues without ALSA close/reopen
+- Rate or format change: `drop → close → reopen`; UI labels this as "rate-change gap"
+- `PipelineSnapshot::gapless_pending` bool visible in Pipeline view
+
+**Acceptance.**
+- Two 44.1k/16-bit FLACs queued: transition is inaudible (< 1 ms gap)
+- 44.1k → 96k transition: brief silence, labeled in UI
+- xrun count does not increase across gapless boundary
+
+---
+
+## Phase 17 — Waveform + live spectrum
+
+**Goal.** Visual audio representation: per-file waveform envelope on the seekbar and a real-time FFT spectrum panel.
+
+**Deliverable.**
+- `gui/util/waveform.cpp`: background-thread decode → per-file amplitude envelope (peak per 512 frames, stored as `std::vector<float>`); cached by track ID in memory (LRU, max 20 tracks)
+- Seekbar waveform overlay: ImGui draw list; current-position cursor; click/drag → seek
+- `engine/spectrum/`: lock-free ring buffer tap in audio thread (latest 2048 samples); Hann window + FFT (KissFFT or similar); magnitude per bin posted to GUI thread via atomic snapshot
+- Spectrum panel in main view: 64-bar display, peak hold, logarithmic frequency axis
+
+**Acceptance.**
+- Waveform renders within 2 s of track load for a 10-minute FLAC
+- Spectrum visually responds to frequency content of a sine sweep test file
+- CPU overhead of spectrum computation ≤ 3% on a single core
+
+---
+
+## Phase 18 — Queue improvements + smart playlists
+
+**Goal.** Practical playlist management: drag-drop queue, saved playlists, rule-based auto-playlists.
+
+**Deliverable.**
+- Queue view: drag-drop reorder via ImGui; remove-from-queue per item; clear-queue button
+- Saved playlists: `playlists` and `playlist_tracks` tables in SQLite; save-current-queue and load-playlist UI
+- Smart playlists: `smart_playlists` table with JSON rule blob; rule types: artist =, genre =, date range, album =, duration </>; evaluated at query time against `tracks` table
+
+**Acceptance.**
+- Drag-drop reorder persists for session
+- Saved playlist survives restart
+- Smart playlist "all Jazz albums after 2010" returns correct results from a seeded library
+
+---
+
+## Phase 19 — ReplayGain
+
+**Goal.** Optional loudness normalization via REPLAYGAIN tags.
+
+**Deliverable.**
+- All decoders expose `replaygain_track_gain_db`, `replaygain_album_gain_db` in `TrackInfo`
+- `engine/dsp/replaygain.cpp`: float gain multiplier applied in a digital-domain stage between ring buffer write and ALSA (non-RT path — applies before writing to ring, in decode thread)
+- Modes: off / track / album; per-session toggle in UI
+- Bit-perfect indicator: QUALIFIED when active; Pipeline view shows gain stage
+
+**Acceptance.**
+- Track with known +3.5 dB tag: measured output level matches expectation via loopback
+- ReplayGain off: gain stage absent from pipeline; bit-perfect indicator unaffected
+- Clipping prevention: applied gain capped at +6 dB; negative gain unlimited
+
+---
+
 ## Out of phase plan (future, if at all)
 
 - AUR packaging — community can do; we don't.
