@@ -595,6 +595,38 @@ void handle_view_shortcuts(AppState& st) {
             }
         }
     }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
+        if (st.hw_volume_pct >= 0) {
+            const auto& hw = st.engine_->pipeline_snapshot().device.current_hw_string;
+            if (!hw.empty()) {
+                const int pct = std::clamp(st.hw_volume_pct + 5, 0, 100);
+                engine::set_hw_volume_pct(hw, pct);
+                st.hw_volume_pct = pct;
+                st.hw_volume_last_poll = {};
+            }
+        }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
+        if (st.hw_volume_pct >= 0) {
+            const auto& hw = st.engine_->pipeline_snapshot().device.current_hw_string;
+            if (!hw.empty()) {
+                const int pct = std::clamp(st.hw_volume_pct - 5, 0, 100);
+                engine::set_hw_volume_pct(hw, pct);
+                st.hw_volume_pct = pct;
+                st.hw_volume_last_poll = {};
+            }
+        }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_M)) {
+        if (st.hw_volume_pct >= 0) {
+            const auto& hw = st.engine_->pipeline_snapshot().device.current_hw_string;
+            if (!hw.empty()) {
+                engine::toggle_hw_mute(hw);
+                st.hw_volume_last_poll = {};
+            }
+        }
+    }
 }
 
 } // namespace

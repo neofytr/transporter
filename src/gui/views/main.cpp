@@ -108,14 +108,24 @@ static SpectrumState g_spectrum;
 void dac_combo(AppState& st) {
     ImGui::TextColored(kMuted, "DAC:");
     ImGui::SameLine();
-    const char* preview = st.preferred_device.empty()
-        ? "(none)" : st.preferred_device.c_str();
 
-    if (ImGui::BeginCombo("##dac", preview)) {
+    // Show friendly card name in the collapsed preview.
+    std::string preview_buf = "(none)";
+    if (!st.preferred_device.empty()) {
+        preview_buf = st.preferred_device;
+        for (const auto& d : st.devices) {
+            if (d.alsa_hw_string == st.preferred_device) {
+                preview_buf = d.fingerprint.alsa_card_name;
+                break;
+            }
+        }
+    }
+
+    if (ImGui::BeginCombo("##dac", preview_buf.c_str())) {
         for (const auto& d : st.devices) {
             const bool selected = (d.alsa_hw_string == st.preferred_device);
-            std::string label = d.fingerprint.alsa_card_name + " (" +
-                                d.alsa_hw_string + ")";
+            std::string label = d.fingerprint.alsa_card_name + "  " +
+                                d.alsa_hw_string;
             if (ImGui::Selectable(label.c_str(), selected)) {
                 if (d.alsa_hw_string != st.preferred_device) {
                     st.pending_device_switch = d.alsa_hw_string;
@@ -506,15 +516,21 @@ void draw_main_view(AppState& st) {
                 st.hw_volume_last_poll = now;
             }
             int pct = st.hw_volume_pct;
+            if (st.hw_volume_muted) {
+                ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.2f, 1.0f), "VOL  muted");
+            } else {
+                ImGui::TextColored(kMuted, "VOL  %d%%", pct);
+            }
+            ImGui::SameLine();
             ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::SliderInt("Vol", &pct, 0, 100, "%d%%")) {
+            if (ImGui::SliderInt("##vol", &pct, 0, 100, "%d%%")) {
                 st.hw_volume_pct = pct;
                 engine::set_hw_volume_pct(hw_string, pct);
             }
             ImGui::SameLine();
             if (ImGui::Button("Mute")) {
                 engine::toggle_hw_mute(hw_string);
-                st.hw_volume_last_poll = {};  // force re-poll next frame
+                st.hw_volume_last_poll = {};
             }
             if (vol.has_db_scale) {
                 ImGui::SameLine();
