@@ -104,16 +104,28 @@ Window::create(const WindowConfig& cfg) {
     constexpr const char* kFont =
         "/home/raj/.local/share/fonts/JetBrainsMono/"
         "JetBrainsMonoNerdFont-Regular.ttf";
-    // Glyph ranges: Basic Latin + the Miscellaneous Technical block that
-    // contains the media-control symbols used throughout the UI (⏸⏹⏮⏭ etc.,
-    // U+2300-U+23FF). Without this range they render as boxes.
+    // Glyph ranges: Basic Latin, Latin-1, the Miscellaneous Technical block
+    // (media controls U+2300..U+23FF), General Punctuation (em-dash, middle
+    // dot), the Geometric Shapes range that holds the play triangle (U+25B6)
+    // plus dot/circle markers, and the Misc Symbols block where the speaker
+    // and shuffle/repeat glyphs live (U+2600..U+26FF). Without these ranges
+    // the glyphs render as boxes.
     static constexpr ImWchar kGlyphRanges[] = {
         0x0020, 0x00FF,  // Basic Latin + Latin-1 Supplement
+        0x2010, 0x205F,  // General Punctuation (em-dash, bullets, ellipsis)
         0x2300, 0x23FF,  // Miscellaneous Technical (media symbols)
+        0x25A0, 0x25FF,  // Geometric Shapes (▶, ●, ■)
+        0x2600, 0x26FF,  // Miscellaneous Symbols (🔀-style markers)
+        0x2700, 0x27BF,  // Dingbats
         0,
     };
     if (std::filesystem::exists(kFont)) {
         io.Fonts->AddFontFromFileTTF(kFont, 17.0f, nullptr, kGlyphRanges);
+        s.font_title = io.Fonts->AddFontFromFileTTF(kFont, 28.0f, nullptr, kGlyphRanges);
+        s.font_h2    = io.Fonts->AddFontFromFileTTF(kFont, 18.0f, nullptr, kGlyphRanges);
+        s.font_body  = io.Fonts->AddFontFromFileTTF(kFont, 14.0f, nullptr, kGlyphRanges);
+        s.font_small = io.Fonts->AddFontFromFileTTF(kFont, 12.0f, nullptr, kGlyphRanges);
+        s.font_icon  = io.Fonts->AddFontFromFileTTF(kFont, 32.0f, nullptr, kGlyphRanges);
     } else {
         ImFontConfig fcfg;
         fcfg.SizePixels = 15.0f;
@@ -219,6 +231,12 @@ bool Window::take_media_prev()       noexcept { return impl_->media_prev.exchang
 bool Window::take_media_mute()       noexcept { return impl_->media_mute.exchange(false); }
 bool Window::take_media_vol_up()     noexcept { return impl_->media_vol_up.exchange(false); }
 bool Window::take_media_vol_down()   noexcept { return impl_->media_vol_down.exchange(false); }
+
+ImFont* Window::font_title() const noexcept { return impl_->font_title; }
+ImFont* Window::font_h2()    const noexcept { return impl_->font_h2;    }
+ImFont* Window::font_body()  const noexcept { return impl_->font_body;  }
+ImFont* Window::font_small() const noexcept { return impl_->font_small; }
+ImFont* Window::font_icon()  const noexcept { return impl_->font_icon;  }
 
 void Window::resize(int w, int h) {
     impl_->width  = w;

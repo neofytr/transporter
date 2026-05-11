@@ -44,6 +44,7 @@ wayland_proto_inc = include_directories('platform')
 
 gui_sources = files(
   'gui.cpp',
+  'theme.cpp',
   'platform/platform.cpp',
   'platform/wayland.cpp',
   'platform/xdg_shell.cpp',
@@ -51,6 +52,7 @@ gui_sources = files(
   'platform/shm.cpp',
   'platform/render.cpp',
   'platform/input.cpp',
+  'util/dominant_color.cpp',
   'views/app.cpp',
   'views/main.cpp',
   'views/library.cpp',

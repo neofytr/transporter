@@ -6,6 +6,8 @@
 #include "app.hpp"
 #include "playlist.hpp"
 #include "../platform/platform.hpp"
+#include "../theme.hpp"
+#include "../util/dominant_color.hpp"
 
 #include <transporter/config/config.hpp>
 #include <transporter/dbus/service.hpp>
@@ -14,7 +16,6 @@
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/library/library.hpp>
-#include <transporter/theme/theme.hpp>
 
 #include <imgui.h>
 
@@ -1021,14 +1022,11 @@ int run(const AppArgs& args) {
         return 1;
     }
     auto& win = **win_or;
+    st.window = &win;
 
-    {
-        const char* home = std::getenv("HOME");
-        const auto hypr_conf = std::filesystem::path{home ? home : ""} /
-                               ".config/hypr/hyprland.conf";
-        const auto t = theme::Theme::load(hypr_conf);
-        theme::apply_to_imgui(t);
-    }
+    // Initial neutral palette; main view will replace it once a track loads
+    // and the dominant colour of its album art is extracted.
+    apply_theme(default_dominant_color());
 
     // Engine, library, and DBus start on a background thread. The Wayland
     // event loop runs from the very first frame so compositor pings are

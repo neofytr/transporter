@@ -31,6 +31,7 @@ struct xdg_toplevel;
 struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
+struct ImFont;
 
 namespace transporter::gui::platform {
 
@@ -104,6 +105,14 @@ public:
     bool take_media_mute()       noexcept;
     bool take_media_vol_up()     noexcept;
     bool take_media_vol_down()   noexcept;
+
+    // Named fonts loaded at multiple point sizes for the type hierarchy.
+    // Returns nullptr if the JetBrainsMono TTF was unavailable at init.
+    ImFont* font_title() const noexcept;
+    ImFont* font_h2()    const noexcept;
+    ImFont* font_body()  const noexcept;
+    ImFont* font_small() const noexcept;
+    ImFont* font_icon()  const noexcept;
 
 private:
     Window();

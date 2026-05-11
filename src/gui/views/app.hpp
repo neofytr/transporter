@@ -25,6 +25,8 @@
 
 namespace transporter::gui {
 
+namespace platform { class Window; }
+
 enum class ViewId { Main, Library, Pipeline, Queue };
 
 struct LogEntry {
@@ -38,6 +40,10 @@ struct AppState {
     std::unique_ptr<engine::Engine> engine_;
     std::unique_ptr<library::Library> library_;
     std::unique_ptr<dbus_svc::DbusService> dbus_;
+
+    // Non-owning. Set once in run() before the first draw call. nullptr in
+    // run_headless() and tests; views must null-check before dereference.
+    platform::Window* window = nullptr;
 
     std::string preferred_device;     // last applied --device or [device].preferred
     std::vector<engine::DeviceInfo> devices;

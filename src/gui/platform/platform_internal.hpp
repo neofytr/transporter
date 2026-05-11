@@ -15,6 +15,8 @@
 
 #include "xdg-shell-client-protocol.h"
 
+struct ImFont;
+
 namespace transporter::gui::platform {
 
 enum class RenderMode { CPU, GPU };
@@ -92,6 +94,14 @@ struct WindowImpl {
     const uint8_t* font_pixels   = nullptr;
     int            font_atlas_w  = 0;
     int            font_atlas_h  = 0;
+
+    // Named font sizes; main view references these for the visual hierarchy.
+    // Built once in Window::create; nullptr if the TTF is missing.
+    ImFont* font_title = nullptr;  // 28pt — track title
+    ImFont* font_h2    = nullptr;  // 18pt — artist / album
+    ImFont* font_body  = nullptr;  // 14pt — body
+    ImFont* font_small = nullptr;  // 12pt — secondary / muted
+    ImFont* font_icon  = nullptr;  // 32pt — transport glyphs
 
     // Default to CPU so partial-init teardown sees the safe path; create()
     // upgrades to GPU once init_egl + ImGui_ImplOpenGL3_Init both succeed.

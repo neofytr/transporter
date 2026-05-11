@@ -1,36 +1,52 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Minimal main view: track block, transport row, DAC selector, bit-perfect
-// indicator. Empty state is the locked first-run UX.
+// Main view. Cover hero, type hierarchy (title / artist · album), custom
+// seekbar with waveform underlay, icon-only transport row, status footer
+// with bit-perfect badge + volume.
 
 #include "app.hpp"
-#include "lyrics.hpp"
-#include "spectrum.hpp"
+#include "albumart.hpp"
+#include "../platform/platform.hpp"
+#include "../theme.hpp"
+#include "../util/dominant_color.hpp"
 
 #include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
-#include <transporter/engine/ring.hpp>
 #include <transporter/engine/telemetry.hpp>
 
 #include <imgui.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
-#include <complex>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <numbers>
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 
 namespace transporter::gui {
 
-static void format_time(std::int64_t ms, char* out, std::size_t n) {
+namespace {
+
+constexpr ImVec4 kPass{0.40f, 0.85f, 0.40f, 1.0f};
+constexpr ImVec4 kFail{0.95f, 0.40f, 0.35f, 1.0f};
+constexpr ImVec4 kWarn{0.95f, 0.75f, 0.30f, 1.0f};
+
+// Glyphs picked from JetBrainsMono / Misc-Technical, Geometric Shapes:
+//   prev U+23EE, next U+23ED, pause U+23F8, play U+25B6, shuffle U+1F500
+//   fallback "S"/"R" for shuffle/repeat if private-use isn't in our ranges.
+constexpr const char* kGlyphPrev  = "\xe2\x8f\xae";  // ⏮  U+23EE
+constexpr const char* kGlyphNext  = "\xe2\x8f\xad";  // ⏭  U+23ED
+constexpr const char* kGlyphPause = "\xe2\x8f\xb8";  // ⏸  U+23F8
+constexpr const char* kGlyphPlay  = "\xe2\x96\xb6";  // ▶  U+25B6
+
+void format_time(std::int64_t ms, char* out, std::size_t n) {
     if (ms < 0) ms = 0;
-    const std::int64_t s  = ms / 1000;
-    const std::int64_t m  = s / 60;
-    const std::int64_t h  = m / 60;
+    const std::int64_t s = ms / 1000;
+    const std::int64_t m = s / 60;
+    const std::int64_t h = m / 60;
     if (h > 0) {
         std::snprintf(out, n, "%lld:%02lld:%02lld",
                       static_cast<long long>(h),
@@ -43,169 +59,99 @@ static void format_time(std::int64_t ms, char* out, std::size_t n) {
     }
 }
 
-namespace {
-
-constexpr ImVec4 kPass{0.40f, 0.85f, 0.40f, 1.0f};
-constexpr ImVec4 kFail{0.95f, 0.40f, 0.35f, 1.0f};
-constexpr ImVec4 kWarn{0.95f, 0.75f, 0.30f, 1.0f};
-constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
-
-struct SpectrumState {
-    static constexpr std::size_t FFT_N = 1024;
-    static constexpr int BARS = 32;
-
-    std::array<float, FFT_N> sample_buf{};
-    std::size_t sample_pos = 0;
-    std::array<float, BARS> magnitudes{};
-    std::array<float, BARS> peaks{};
-
-    void ingest(const float* samples, std::size_t n) {
-        for (std::size_t i = 0; i < n; ++i) {
-            sample_buf[sample_pos % FFT_N] = samples[i];
-            ++sample_pos;
-        }
-    }
-
-    void compute(std::uint32_t sample_rate_hz) {
-        if (sample_pos < FFT_N) return;
-
-        std::array<float, FFT_N> windowed;
-        for (std::size_t i = 0; i < FFT_N; ++i)
-            windowed[i] = sample_buf[(sample_pos - FFT_N + i) % FFT_N];
-        apply_hann(windowed);
-
-        std::array<std::complex<float>, FFT_N> cx{};
-        for (std::size_t i = 0; i < FFT_N; ++i)
-            cx[i] = {windowed[i], 0.0f};
-        fft(cx);
-
-        const float rate = static_cast<float>(sample_rate_hz > 0 ? sample_rate_hz : 44100);
-        const float bin_hz = rate / static_cast<float>(FFT_N);
-        const float log_lo = std::log10(20.0f);
-        const float log_hi = std::log10(20000.0f);
-
-        for (int b = 0; b < BARS; ++b) {
-            const float lo_hz = std::pow(10.0f, log_lo + (log_hi - log_lo) * static_cast<float>(b)     / BARS);
-            const float hi_hz = std::pow(10.0f, log_lo + (log_hi - log_lo) * static_cast<float>(b + 1) / BARS);
-            const int bin_lo = std::max(1, static_cast<int>(lo_hz / bin_hz));
-            const int bin_hi = std::min(static_cast<int>(FFT_N / 2),
-                                        static_cast<int>(hi_hz / bin_hz) + 1);
-
-            float mag = 0.0f;
-            for (int k = bin_lo; k < bin_hi; ++k)
-                mag = std::max(mag, std::abs(cx[static_cast<std::size_t>(k)]));
-            float db = mag > 0.0f ? 20.0f * std::log10(mag / static_cast<float>(FFT_N / 2)) : -90.0f;
-            float norm = std::clamp((db + 90.0f) / 90.0f, 0.0f, 1.0f);
-            const auto bi = static_cast<std::size_t>(b);
-            magnitudes[bi] = norm > magnitudes[bi] ? norm : magnitudes[bi] * 0.85f;
-            if (norm >= peaks[bi]) peaks[bi] = norm;
-            else peaks[bi] = std::max(0.0f, peaks[bi] - 0.01f);
-        }
-    }
+// Album-art cache keyed by track-directory path. AlbumArt owns its pixel
+// buffer; references stay valid for the lifetime of the process. Lookups
+// happen on the GUI thread only — no locking required.
+struct ArtCache {
+    std::unordered_map<std::string, AlbumArt> map;
+    std::string last_loaded;  // last directory we attempted
 };
 
-static SpectrumState g_spectrum;
-
-void dac_combo(AppState& st) {
-    ImGui::TextColored(kMuted, "DAC:");
-    ImGui::SameLine();
-
-    // Show friendly card name in the collapsed preview.
-    std::string preview_buf = "(none)";
-    if (!st.preferred_device.empty()) {
-        preview_buf = st.preferred_device;
-        for (const auto& d : st.devices) {
-            if (d.alsa_hw_string == st.preferred_device) {
-                preview_buf = d.fingerprint.alsa_card_name;
-                break;
-            }
-        }
-    }
-
-    if (ImGui::BeginCombo("##dac", preview_buf.c_str())) {
-        for (const auto& d : st.devices) {
-            const bool selected = (d.alsa_hw_string == st.preferred_device);
-            const bool busy = d.caps.caps_probe_failed;
-            std::string label = d.fingerprint.alsa_card_name + "  " +
-                                d.alsa_hw_string;
-            if (busy) label += "  (busy)";
-            if (ImGui::Selectable(label.c_str(), selected,
-                                  busy ? ImGuiSelectableFlags_Disabled : 0)) {
-                if (d.alsa_hw_string != st.preferred_device) {
-                    st.pending_device_switch = d.alsa_hw_string;
-                }
-            }
-            if (busy && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("%s", d.caps.probe_failure_reason.c_str());
-            }
-            if (selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
-    }
+ArtCache& art_cache() {
+    static ArtCache c;
+    return c;
 }
 
-void empty_state(AppState& st) {
-    ImGui::Spacing(); ImGui::Spacing();
-    if (!st.devices.empty()) {
-        dac_combo(st);
-        ImGui::SameLine();
-        if (!st.preferred_device.empty()) {
-            if (ImGui::Button("Reclaim DAC")) {
-                st.pending_device_switch = st.preferred_device;
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Re-open exclusive ALSA hold on the selected DAC.");
-            }
-        }
-        ImGui::Spacing();
-    }
-    ImGui::Indent(40.0f);
-    ImGui::PushFont(nullptr);
-    if (st.devices.empty()) {
-        ImGui::TextDisabled("no DAC found");
-        ImGui::TextColored(kMuted, "Plug in a USB DAC and restart, or set "
-                                   "[device].preferred in your config:");
-        ImGui::Bullet();
-        ImGui::TextColored(kMuted, "~/.config/transporter/config.toml");
-    } else if (st.preferred_device.empty()) {
-        ImGui::TextDisabled("select a DAC above");
-    }
-    if (st.library_ == nullptr || st.cfg.library.roots.empty()) {
-        ImGui::Spacing();
-        ImGui::TextDisabled("no library configured");
-        ImGui::TextColored(kMuted, "Add a [library].roots entry in "
-                                   "~/.config/transporter/config.toml.");
-    }
-    ImGui::PopFont();
-    ImGui::Unindent(40.0f);
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextColored(kMuted, "events:");
-    const auto entries = st.snapshot_log(6);
-    for (const auto& e : entries) {
-        ImGui::TextWrapped("%s", e.text.c_str());
-    }
+const AlbumArt& art_for_track(const std::filesystem::path& file_path) {
+    static const AlbumArt empty;
+    if (file_path.empty()) return empty;
+    auto& c = art_cache();
+    const std::string dir = file_path.parent_path().string();
+    if (auto it = c.map.find(dir); it != c.map.end()) return it->second;
+    AlbumArt a = load_album_art(file_path.parent_path());
+    auto [it, _] = c.map.emplace(dir, std::move(a));
+    return it->second;
 }
 
+// Push a named font if available; otherwise fall back to the default. The
+// matching pop is unconditional — PushFont(nullptr) is well-defined.
+struct ScopedFont {
+    ScopedFont(ImFont* f) { ImGui::PushFont(f); }
+    ~ScopedFont() { ImGui::PopFont(); }
+    ScopedFont(const ScopedFont&) = delete;
+    ScopedFont& operator=(const ScopedFont&) = delete;
+};
+
+ImFont* f_title(AppState& st) { return st.window ? st.window->font_title() : nullptr; }
+ImFont* f_h2   (AppState& st) { return st.window ? st.window->font_h2()    : nullptr; }
+ImFont* f_small(AppState& st) { return st.window ? st.window->font_small() : nullptr; }
+ImFont* f_icon (AppState& st) { return st.window ? st.window->font_icon()  : nullptr; }
+
+// Centre-align the text cursor for a single line of width tw within available width.
+void center_x(float content_w, float tw) {
+    const float x = ImGui::GetCursorPosX() + (content_w - tw) * 0.5f;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), x));
+}
+
+// ── transport icon button (manual-draw) ─────────────────────────────────────
+// 48×48 hit-target; on hover, render a soft translucent disc behind the glyph.
+// Returns true on click.
+bool icon_button(const char* id, const char* glyph, ImFont* glyph_font,
+                 float size, const ImVec4& glyph_col, bool emphasize) {
+    ImGui::PushID(id);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##hit", ImVec2(size, size));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 centre(origin.x + size * 0.5f, origin.y + size * 0.5f);
+    if (emphasize) {
+        dl->AddCircleFilled(centre, size * 0.45f, IM_COL32(255, 255, 255, 22));
+    }
+    if (hovered) {
+        dl->AddCircleFilled(centre, size * 0.48f, IM_COL32(255, 255, 255, 36));
+    }
+    if (glyph_font) {
+        const float fs = glyph_font->FontSize;
+        const ImVec2 ts = glyph_font->CalcTextSizeA(fs, FLT_MAX, 0.0f, glyph);
+        const ImVec2 pos(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f);
+        dl->AddText(glyph_font, fs, pos,
+                    ImGui::ColorConvertFloat4ToU32(glyph_col), glyph);
+    } else {
+        const ImVec2 ts = ImGui::CalcTextSize(glyph);
+        const ImVec2 pos(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f);
+        dl->AddText(pos, ImGui::ColorConvertFloat4ToU32(glyph_col), glyph);
+    }
+    ImGui::PopID();
+    return clicked;
+}
+
+// ── verdict dot ─────────────────────────────────────────────────────────────
 void verdict_badge(const engine::PipelineSnapshot& s) {
     using L = engine::BitPerfectVerdict::Level;
     ImVec4 col = kFail;
-    if (s.bit_perfect.level == L::Yes) {
-        col = kPass;
-    } else if (s.bit_perfect.level == L::Qualified) {
-        col = kWarn;
-    }
-    // Draw a small filled circle using ImDrawList; Dummy creates the hover region.
-    const float radius = 6.0f;
+    const char* label = "Not bit-perfect";
+    if (s.bit_perfect.level == L::Yes)        { col = kPass; label = "Bit-Perfect"; }
+    else if (s.bit_perfect.level == L::Qualified) { col = kWarn; label = "Bit-Perfect (qualified)"; }
+
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
     const float cy = cursor.y + ImGui::GetTextLineHeight() * 0.5f;
+    constexpr float r = 5.0f;
     ImGui::GetWindowDrawList()->AddCircleFilled(
-        ImVec2(cursor.x + radius, cy), radius,
-        ImGui::ColorConvertFloat4ToU32(col));
-    ImGui::Dummy(ImVec2(radius * 2.0f + 4.0f, ImGui::GetTextLineHeight()));
+        ImVec2(cursor.x + r, cy), r, ImGui::ColorConvertFloat4ToU32(col));
+    ImGui::Dummy(ImVec2(r * 2.0f + 8.0f, ImGui::GetTextLineHeight()));
+    ImGui::SameLine(0, 0);
+    ImGui::TextUnformatted(label);
     if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::Text("digital path bit-perfect: %s",
@@ -227,135 +173,554 @@ void verdict_badge(const engine::PipelineSnapshot& s) {
     }
 }
 
+// ── cover art block with subtle drop shadow ─────────────────────────────────
+void draw_cover(const AlbumArt& art, const DominantColor& dc, ImVec2 pos, float size) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Shadow: two offset rounded rects fading down.
+    const ImU32 sh1 = IM_COL32(0, 0, 0, 80);
+    const ImU32 sh2 = IM_COL32(0, 0, 0, 30);
+    dl->AddRectFilled(ImVec2(pos.x + 2, pos.y + 8),
+                      ImVec2(pos.x + size + 2, pos.y + size + 8), sh2, 10.0f);
+    dl->AddRectFilled(ImVec2(pos.x + 1, pos.y + 4),
+                      ImVec2(pos.x + size + 1, pos.y + size + 4), sh1, 10.0f);
+
+    const ImVec2 a = pos;
+    const ImVec2 b = ImVec2(pos.x + size, pos.y + size);
+    if (art) {
+        // Square image. Avoid AddImageRounded: the CPU renderer's textured
+        // triangle path samples the font atlas, which would mis-render the
+        // rounded corner triangles. The drop shadow softens the edge enough.
+        dl->AddImage(art.texture_id(), a, b);
+    } else {
+        // Placeholder: accent-tinted square with a centred note glyph.
+        const ImU32 fill = ImGui::ColorConvertFloat4ToU32(
+            ImVec4(dc.accent.x * 0.40f, dc.accent.y * 0.40f, dc.accent.z * 0.40f, 1.0f));
+        dl->AddRectFilled(a, b, fill, 10.0f);
+        const char* note = "\xe2\x99\xaa";  // ♪
+        const ImVec2 ts  = ImGui::CalcTextSize(note);
+        dl->AddText(ImVec2(pos.x + (size - ts.x) * 0.5f,
+                           pos.y + (size - ts.y) * 0.5f),
+                    IM_COL32(255, 255, 255, 140), note);
+    }
+}
+
+// ── custom seekbar with optional waveform underlay ──────────────────────────
+// Returns true on commit; out_target_frac is the desired position [0,1].
+bool draw_seekbar(AppState& st,
+                  const engine::PipelineSnapshot& snap,
+                  float frac,
+                  float width,
+                  const DominantColor& dc,
+                  float& out_frac) {
+    out_frac = frac;
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    constexpr float kHitH   = 22.0f;
+    constexpr float kTrackH = 6.0f;
+    ImGui::InvisibleButton("##seekhit", ImVec2(width, kHitH));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active  = ImGui::IsItemActive();
+
+    const float track_y = origin.y + (kHitH - kTrackH) * 0.5f;
+    const ImVec2 tmin(origin.x, track_y);
+    const ImVec2 tmax(origin.x + width, track_y + kTrackH);
+    const float radius = kTrackH * 0.5f;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // Subtle waveform underlay (drawn behind the track so it tints the inactive part).
+    if (st.waveform_ready.load(std::memory_order_acquire)) {
+        std::lock_guard lk(st.waveform_mtx);
+        if (!st.waveform.empty()) {
+            const float wh   = kHitH;
+            const float cy   = origin.y + wh * 0.5f;
+            const auto  N    = static_cast<float>(st.waveform.size());
+            const float bw   = width / N;
+            const ImU32 wcol = IM_COL32(255, 255, 255, 32);
+            for (std::size_t i = 0; i < st.waveform.size(); ++i) {
+                const float v  = st.waveform[i];
+                const float x0 = origin.x + static_cast<float>(i) * bw;
+                const float hh = v * wh * 0.5f;
+                dl->AddRectFilled({x0, cy - hh}, {x0 + bw, cy + hh}, wcol);
+            }
+        }
+    }
+
+    // Inactive track.
+    const ImU32 track_col = IM_COL32(255, 255, 255, 32);
+    dl->AddRectFilled(tmin, tmax, track_col, radius);
+
+    // Filled portion.
+    const float clamped = std::clamp(frac, 0.0f, 1.0f);
+    const float fw = clamped * width;
+    if (fw > 0.0f) {
+        const ImU32 acc = ImGui::ColorConvertFloat4ToU32(dc.accent);
+        dl->AddRectFilled(tmin, ImVec2(tmin.x + fw, tmax.y), acc, radius);
+    }
+
+    // Cursor: filled circle. Slightly larger when active.
+    const float cursor_x = origin.x + fw;
+    const float cursor_y = track_y + radius;
+    const float crad = active ? 8.0f : (hovered ? 7.0f : 6.0f);
+    dl->AddCircleFilled(ImVec2(cursor_x, cursor_y), crad,
+                        IM_COL32(245, 245, 250, 255));
+
+    // Hover tooltip with target time.
+    const std::int64_t total_ms = snap.source.duration.count();
+    if (hovered && total_ms > 0) {
+        const float hf = (ImGui::GetMousePos().x - origin.x) / width;
+        const std::int64_t hms = static_cast<std::int64_t>(
+            std::clamp(hf, 0.0f, 1.0f) * static_cast<float>(total_ms));
+        char tb[24];
+        format_time(hms, tb, sizeof(tb));
+        ImGui::SetTooltip("%s", tb);
+    }
+
+    // Drag-to-scrub.
+    if (active) {
+        const float nf = (ImGui::GetMousePos().x - origin.x) / width;
+        out_frac = std::clamp(nf, 0.0f, 1.0f);
+    }
+    return active && ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+}
+
+// ── DAC popup (gear/cog menu) ──────────────────────────────────────────────
+void dac_popup(AppState& st, const engine::PipelineSnapshot& snap) {
+    if (!ImGui::BeginPopup("##dac_popup")) return;
+
+    if (st.devices.empty()) {
+        ImGui::TextDisabled("no DAC found");
+    } else {
+        ImGui::TextDisabled("output device");
+        ImGui::Separator();
+        for (const auto& d : st.devices) {
+            const bool selected = (d.alsa_hw_string == st.preferred_device);
+            const bool busy = d.caps.caps_probe_failed;
+            std::string label = d.fingerprint.alsa_card_name;
+            if (busy) label += "  (busy)";
+            if (ImGui::MenuItem(label.c_str(), nullptr, selected,
+                                !busy || selected)) {
+                if (d.alsa_hw_string != st.preferred_device) {
+                    st.pending_device_switch = d.alsa_hw_string;
+                }
+            }
+            if (busy && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("%s", d.caps.probe_failure_reason.c_str());
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Reclaim DAC")) {
+            if (!st.preferred_device.empty()) {
+                st.pending_device_switch = st.preferred_device;
+            }
+        }
+        if (ImGui::MenuItem("Release DAC")) {
+            st.release_dac_requested = true;
+        }
+    }
+    (void)snap;
+    ImGui::EndPopup();
+}
+
+// ── empty state ─────────────────────────────────────────────────────────────
+void draw_empty_state(AppState& st) {
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float content_w = avail.x;
+
+    // Vertically centre.
+    const float vpad = std::max(40.0f, (avail.y - 240.0f) * 0.4f);
+    ImGui::Dummy(ImVec2(0, vpad));
+
+    // Centred icon.
+    if (auto* fi = f_icon(st)) {
+        ScopedFont scoped(fi);
+        const char* glyph = "\xe2\x99\xab";  // ♫
+        const ImVec2 ts = ImGui::CalcTextSize(glyph);
+        center_x(content_w, ts.x);
+        ImGui::TextDisabled("%s", glyph);
+    }
+    ImGui::Dummy(ImVec2(0, 8));
+
+    // Headline.
+    if (auto* ft = f_title(st)) {
+        ScopedFont scoped(ft);
+        const char* head = "No track loaded";
+        const ImVec2 ts = ImGui::CalcTextSize(head);
+        center_x(content_w, ts.x);
+        ImGui::TextUnformatted(head);
+    } else {
+        const char* head = "No track loaded";
+        const ImVec2 ts = ImGui::CalcTextSize(head);
+        center_x(content_w, ts.x);
+        ImGui::TextUnformatted(head);
+    }
+    ImGui::Dummy(ImVec2(0, 4));
+
+    // Sub-line — varies with what's missing.
+    {
+        std::string sub;
+        if (st.engine_ == nullptr) {
+            if (st.devices.empty())                sub = "No DAC detected. Plug one in, then restart.";
+            else if (st.preferred_device.empty())  sub = "Select a DAC to begin.";
+            else                                   sub = "Initialising audio engine…";
+        } else if (st.library_ == nullptr ||
+                   st.cfg.library.roots.empty()) {
+            sub = "Add a library root in ~/.config/transporter/config.toml.";
+        } else {
+            sub = "Open the Library tab and pick a track.";
+        }
+        if (auto* fh = f_h2(st)) {
+            ScopedFont scoped(fh);
+            const ImVec2 ts = ImGui::CalcTextSize(sub.c_str());
+            center_x(content_w, ts.x);
+            ImGui::TextDisabled("%s", sub.c_str());
+        } else {
+            const ImVec2 ts = ImGui::CalcTextSize(sub.c_str());
+            center_x(content_w, ts.x);
+            ImGui::TextDisabled("%s", sub.c_str());
+        }
+    }
+    ImGui::Dummy(ImVec2(0, 24));
+
+    // Inline DAC selector when one exists but none is chosen.
+    if (st.engine_ == nullptr && !st.devices.empty()) {
+        const float bw = 220.0f;
+        center_x(content_w, bw);
+        ImGui::SetNextItemWidth(bw);
+        std::string preview = st.preferred_device.empty() ? "(select)" : st.preferred_device;
+        for (const auto& d : st.devices) {
+            if (d.alsa_hw_string == st.preferred_device) {
+                preview = d.fingerprint.alsa_card_name;
+                break;
+            }
+        }
+        if (ImGui::BeginCombo("##empty_dac", preview.c_str())) {
+            for (const auto& d : st.devices) {
+                const bool selected = (d.alsa_hw_string == st.preferred_device);
+                const bool busy = d.caps.caps_probe_failed;
+                std::string label = d.fingerprint.alsa_card_name;
+                if (busy) label += "  (busy)";
+                if (ImGui::Selectable(label.c_str(), selected,
+                                      busy ? ImGuiSelectableFlags_Disabled : 0)) {
+                    if (d.alsa_hw_string != st.preferred_device) {
+                        st.pending_device_switch = d.alsa_hw_string;
+                    }
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+}
+
+// ── status footer (format · bit-perfect · volume) ───────────────────────────
+void draw_status_footer(AppState& st, const engine::PipelineSnapshot& snap) {
+    if (auto* fs = f_small(st)) ImGui::PushFont(fs);
+
+    ImGui::Dummy(ImVec2(0, 4));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 4));
+
+    // Left: format summary + bit-perfect verdict.
+    // Right: volume slider + HW/SW pill.
+    const float total_w = ImGui::GetContentRegionAvail().x;
+    const float vol_w   = 260.0f;
+    const float left_w  = total_w - vol_w - 24.0f;
+
+    ImGui::BeginGroup();
+    {
+        // Format summary.
+        char fmt[96];
+        if (snap.source.sample_rate_hz > 0) {
+            const double khz = static_cast<double>(snap.source.sample_rate_hz) / 1000.0;
+            const unsigned bd = snap.source.bit_depth_file;
+            const char* codec = snap.source.codec_name.empty()
+                ? "PCM" : snap.source.codec_name.c_str();
+            if (bd > 0) {
+                std::snprintf(fmt, sizeof(fmt), "%.1f kHz  %u-bit  %s", khz, bd, codec);
+            } else {
+                std::snprintf(fmt, sizeof(fmt), "%.1f kHz  %s", khz, codec);
+            }
+        } else {
+            std::snprintf(fmt, sizeof(fmt), "—");
+        }
+        ImGui::TextDisabled("%s", fmt);
+        ImGui::SameLine();
+        ImGui::TextDisabled(" \xc2\xb7 ");  // middle dot
+        ImGui::SameLine();
+        verdict_badge(snap);
+        ImGui::SameLine();
+        ImGui::TextDisabled(" \xc2\xb7 ");
+        ImGui::SameLine();
+
+        // Compact DAC label, click for menu.
+        std::string dac = "no DAC";
+        for (const auto& d : st.devices) {
+            if (d.alsa_hw_string == st.preferred_device) {
+                dac = d.fingerprint.alsa_card_name;
+                break;
+            }
+        }
+        // Truncate over-long names.
+        if (dac.size() > 28) dac = dac.substr(0, 27) + "\xe2\x80\xa6";
+        if (ImGui::SmallButton(dac.c_str())) {
+            ImGui::OpenPopup("##dac_popup");
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("change output device");
+        dac_popup(st, snap);
+
+        // Shuffle / repeat indicators (clickable, dimmed when off).
+        ImGui::SameLine();
+        ImGui::TextDisabled(" \xc2\xb7 ");
+        ImGui::SameLine();
+        const ImVec4 dim = ImGui::GetStyle().Colors[ImGuiCol_TextDisabled];
+        const ImVec4 lit = ImGui::GetStyleColorVec4(ImGuiCol_SliderGrab);
+        ImGui::PushStyleColor(ImGuiCol_Text, st.shuffle ? lit : dim);
+        if (ImGui::SmallButton("shuffle")) {
+            st.queue_shuffle_toggle();
+            if (st.dbus_) st.dbus_->notify_shuffle_changed();
+        }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        const char* rep_l = "repeat";
+        if (st.repeat_mode == AppState::RepeatMode::One) rep_l = "repeat 1";
+        else if (st.repeat_mode == AppState::RepeatMode::All) rep_l = "repeat all";
+        const bool rep_on = (st.repeat_mode != AppState::RepeatMode::None);
+        ImGui::PushStyleColor(ImGuiCol_Text, rep_on ? lit : dim);
+        if (ImGui::SmallButton(rep_l)) {
+            {
+                std::lock_guard lk(st.queue_mtx);
+                switch (st.repeat_mode) {
+                case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One;  break;
+                case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All;  break;
+                case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+                }
+            }
+            st.refresh_preload();
+            if (st.dbus_) st.dbus_->notify_loop_status_changed();
+        }
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndGroup();
+    (void)left_w;
+
+    // Right-aligned volume.
+    ImGui::SameLine();
+    {
+        const float gx = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x
+                       - vol_w - ImGui::GetStyle().WindowPadding.x;
+        ImGui::SetCursorScreenPos(ImVec2(gx,
+            ImGui::GetCursorScreenPos().y - ImGui::GetTextLineHeight() * 1.2f));
+    }
+    ImGui::BeginGroup();
+    {
+        const auto& hw_string = snap.device.current_hw_string;
+        const auto& vol = snap.device.capabilities.hw_volume;
+        const bool have_hw = vol.present && !hw_string.empty();
+        // Speaker glyph + pill + slider.
+        if (have_hw) {
+            const auto now = std::chrono::steady_clock::now();
+            if (st.hw_volume_pct < 0 ||
+                now - st.hw_volume_last_poll > std::chrono::milliseconds(250)) {
+                st.hw_volume_pct = engine::get_hw_volume_pct(hw_string);
+                if (st.hw_volume_pct < 0) st.hw_volume_pct = 0;
+                st.hw_volume_muted = engine::get_hw_mute_state(hw_string);
+                st.hw_volume_last_poll = now;
+            }
+            // Plain ASCII label; the Nerd Font speaker glyphs at U+1F507/9 sit
+            // in supplementary planes that the atlas glyph ranges don't cover.
+            if (st.hw_volume_muted) ImGui::TextDisabled("MUTE");
+            else                    ImGui::TextDisabled("VOL");
+            ImGui::SameLine();
+            int pct = st.hw_volume_pct;
+            ImGui::SetNextItemWidth(140.0f);
+            if (ImGui::SliderInt("##vol", &pct, 0, 100, "%d%%")) {
+                st.hw_volume_pct = pct;
+                engine::set_hw_volume_pct(hw_string, pct);
+                if (st.dbus_) st.dbus_->notify_volume_changed();
+            }
+            ImGui::SameLine();
+            // HW pill — small filled rect with the literal text "HW".
+            {
+                const ImVec2 p0 = ImGui::GetCursorScreenPos();
+                const ImVec2 ts = ImGui::CalcTextSize("HW");
+                const ImVec2 pill = ImVec2(ts.x + 12.0f, ts.y + 4.0f);
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                const ImU32 col = ImGui::ColorConvertFloat4ToU32(
+                    ImGui::GetStyleColorVec4(ImGuiCol_SliderGrab));
+                dl->AddRectFilled(p0, ImVec2(p0.x + pill.x, p0.y + pill.y),
+                                  col, 6.0f);
+                dl->AddText(ImVec2(p0.x + 6.0f, p0.y + 2.0f),
+                            IM_COL32(20, 20, 24, 255), "HW");
+                ImGui::Dummy(pill);
+            }
+        } else if (!hw_string.empty()) {
+            ImGui::TextDisabled("Vol — no HW control");
+        } else {
+            ImGui::TextDisabled("Vol —");
+        }
+    }
+    ImGui::EndGroup();
+
+    if (auto* fs = f_small(st); fs) ImGui::PopFont();
+}
+
+// ── per-frame: pick album art and apply theme tint if changed ───────────────
+void update_theme_for_track(AppState& st, const engine::PipelineSnapshot& snap) {
+    (void)st;
+    static std::string last_key;
+    const std::string key = snap.source.file_path;
+    if (key == last_key) return;
+    last_key = key;
+
+    if (key.empty()) {
+        apply_theme(default_dominant_color());
+        return;
+    }
+    const AlbumArt& art = art_for_track(std::filesystem::path{key});
+    const DominantColor dc = compute_dominant(key, art);
+    apply_theme(dc);
+}
+
 } // namespace
 
 void draw_main_view(AppState& st) {
     engine::PipelineSnapshot snap{};
-    if (st.engine_) {
-        snap = st.engine_->pipeline_snapshot();
-    }
+    if (st.engine_) snap = st.engine_->pipeline_snapshot();
 
-    // Mini mode toggle — top right of main view
+    // Recompute dominant colour when the active track path changes.
+    update_theme_for_track(st, snap);
+
+    // Mini-mode toggle — small text in top-right of the view.
     {
-        const float btn_w = ImGui::CalcTextSize("mini").x + ImGui::GetStyle().FramePadding.x * 2;
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w);
+        const float lw = ImGui::CalcTextSize("mini").x +
+                         ImGui::GetStyle().FramePadding.x * 2.0f;
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - lw);
         if (ImGui::SmallButton(st.mini_mode ? "full" : "mini")) {
             st.mini_mode = !st.mini_mode;
         }
-        ImGui::SameLine(0, 0);
         ImGui::NewLine();
     }
 
-    // Toast: shown even without an engine.
+    // Toast (transient error).
     {
         std::lock_guard lk(st.toast_mtx);
         if (st.toast.has_value()) {
             if (std::chrono::steady_clock::now() < st.toast->expires) {
-                constexpr ImVec4 kToastBg{0.55f, 0.10f, 0.10f, 1.0f};
+                constexpr ImVec4 kToastBg{0.45f, 0.12f, 0.12f, 1.0f};
                 ImGui::PushStyleColor(ImGuiCol_ChildBg, kToastBg);
-                ImGui::BeginChild("##toast", ImVec2(-FLT_MIN, 28),
+                ImGui::BeginChild("##toast", ImVec2(-FLT_MIN, 32),
                                   ImGuiChildFlags_None);
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4);
-                ImGui::Text(" %s", st.toast->msg.c_str());
+                ImGui::SetCursorPos(ImVec2(16, 6));
+                ImGui::Text("%s", st.toast->msg.c_str());
                 ImGui::EndChild();
                 ImGui::PopStyleColor();
+                ImGui::Dummy(ImVec2(0, 4));
             } else {
                 st.toast.reset();
             }
         }
     }
 
-    if (st.engine_ == nullptr) {
-        empty_state(st);
-        return;
-    }
-
     // Persistent banner for transient non-playing states.
     {
         const auto eng_state = st.last_engine_state.load(std::memory_order_relaxed);
+        const char* msg = nullptr;
+        ImVec4 bg{};
         if (eng_state == engine::State::Disconnected) {
-            constexpr ImVec4 kWarnBg{0.45f, 0.25f, 0.05f, 1.0f};
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, kWarnBg);
-            ImGui::BeginChild("##disc_banner", ImVec2(-FLT_MIN, 22),
-                              ImGuiChildFlags_None);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
-            ImGui::Text("  DAC disconnected — reconnect to resume");
-            ImGui::EndChild();
-            ImGui::PopStyleColor();
+            msg = "DAC disconnected — reconnect to resume";
+            bg = ImVec4(0.40f, 0.26f, 0.06f, 1.0f);
         } else if (eng_state == engine::State::Error) {
-            constexpr ImVec4 kErrBg{0.45f, 0.05f, 0.05f, 1.0f};
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, kErrBg);
-            ImGui::BeginChild("##err_banner", ImVec2(-FLT_MIN, 22),
+            msg = "engine error — see event log";
+            bg = ImVec4(0.40f, 0.08f, 0.08f, 1.0f);
+        }
+        if (msg) {
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, bg);
+            ImGui::BeginChild("##banner", ImVec2(-FLT_MIN, 26),
                               ImGuiChildFlags_None);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
-            ImGui::Text("  engine error — see event log");
+            ImGui::SetCursorPos(ImVec2(16, 4));
+            ImGui::TextUnformatted(msg);
             ImGui::EndChild();
             ImGui::PopStyleColor();
+            ImGui::Dummy(ImVec2(0, 4));
         }
     }
 
-    // Track block
-    ImGui::PushFont(nullptr);
-    if (!snap.source.tags.title.empty()) {
-        ImGui::Text("%s", snap.source.tags.title.c_str());
-    } else if (!snap.source.file_path.empty()) {
-        ImGui::Text("%s", snap.source.file_path.c_str());
-    } else {
-        ImGui::TextDisabled("(no track loaded)");
-    }
-    ImGui::PopFont();
-
-    // Hover the title/filename for full metadata tooltip.
-    if (ImGui::IsItemHovered() && !snap.source.file_path.empty()) {
-        ImGui::BeginTooltip();
-        ImGui::TextDisabled("%s", snap.source.file_path.c_str());
-        ImGui::Separator();
-        if (!snap.source.tags.track_no.empty())
-            ImGui::Text("Track: %s", snap.source.tags.track_no.c_str());
-        if (!snap.source.tags.date.empty())
-            ImGui::Text("Date:  %s", snap.source.tags.date.c_str());
-        if (!snap.source.tags.album_artist.empty() &&
-                snap.source.tags.album_artist != snap.source.tags.artist)
-            ImGui::Text("AA:    %s", snap.source.tags.album_artist.c_str());
-        ImGui::Text("Fmt:   %s  %u Hz  %u ch",
-                    snap.source.codec_name.c_str(),
-                    snap.source.sample_rate_hz,
-                    static_cast<unsigned>(snap.source.channels));
-        if (snap.source.bit_depth_file > 0)
-            ImGui::Text("Depth: %u bit", static_cast<unsigned>(snap.source.bit_depth_file));
-        if (snap.source.bitrate_kbps > 0)
-            ImGui::Text("Rate:  %u kbps", snap.source.bitrate_kbps);
-        ImGui::EndTooltip();
+    // Empty state: no engine OR no track loaded.
+    const bool has_track = !snap.source.file_path.empty() ||
+                           !snap.source.tags.title.empty();
+    if (st.engine_ == nullptr || !has_track) {
+        draw_empty_state(st);
+        return;
     }
 
-    if (!snap.source.tags.artist.empty()) {
-        ImGui::TextColored(kMuted, "%s", snap.source.tags.artist.c_str());
-    }
-    if (!snap.source.tags.album.empty()) {
-        ImGui::TextColored(kMuted, "%s", snap.source.tags.album.c_str());
+    // ── hero (cover) ────────────────────────────────────────────────────────
+    const ImVec2 region = ImGui::GetContentRegionAvail();
+    const float content_w = region.x;
+    const float cover_size = std::clamp(content_w * 0.42f, 220.0f, 320.0f);
+    ImGui::Dummy(ImVec2(0, 4));
+    {
+        const float gx = ImGui::GetCursorPosX() + (content_w - cover_size) * 0.5f;
+        ImGui::SetCursorPosX(gx);
+        const ImVec2 screen_pos = ImGui::GetCursorScreenPos();
+        const AlbumArt& art = art_for_track(std::filesystem::path{snap.source.file_path});
+        // We need the active DominantColor for the placeholder tint; cheap to recompute.
+        DominantColor dc = compute_dominant(snap.source.file_path, art);
+        draw_cover(art, dc, screen_pos, cover_size);
+        ImGui::Dummy(ImVec2(cover_size, cover_size + 4));
     }
 
-    // Queue position
+    // ── title (28pt) ────────────────────────────────────────────────────────
+    {
+        std::string title = !snap.source.tags.title.empty()
+            ? snap.source.tags.title
+            : std::filesystem::path{snap.source.file_path}.stem().string();
+        ImGui::Dummy(ImVec2(0, 18));
+        if (auto* ft = f_title(st)) ImGui::PushFont(ft);
+        const ImVec2 ts = ImGui::CalcTextSize(title.c_str());
+        center_x(content_w, ts.x);
+        ImGui::TextUnformatted(title.c_str());
+        if (f_title(st)) ImGui::PopFont();
+        if (ImGui::IsItemHovered() && !snap.source.file_path.empty()) {
+            ImGui::SetTooltip("%s", snap.source.file_path.c_str());
+        }
+    }
+
+    // ── artist · album (18pt, dim) ─────────────────────────────────────────
+    {
+        std::string line;
+        if (!snap.source.tags.artist.empty()) line = snap.source.tags.artist;
+        if (!snap.source.tags.album.empty()) {
+            if (!line.empty()) line += "  \xc2\xb7  ";
+            line += snap.source.tags.album;
+        }
+        if (!line.empty()) {
+            ImGui::Dummy(ImVec2(0, 2));
+            if (auto* fh = f_h2(st)) ImGui::PushFont(fh);
+            const ImVec2 ts = ImGui::CalcTextSize(line.c_str());
+            center_x(content_w, ts.x);
+            ImGui::TextDisabled("%s", line.c_str());
+            if (f_h2(st)) ImGui::PopFont();
+        }
+    }
+
+    // Queue position (small, below artist line).
     {
         std::lock_guard lk(st.queue_mtx);
         if (st.queue.size() > 1 && st.queue_index >= 0) {
-            ImGui::SameLine();
-            ImGui::TextColored(kMuted, "[%d / %d]",
-                               st.queue_index + 1,
-                               static_cast<int>(st.queue.size()));
+            char qb[32];
+            std::snprintf(qb, sizeof(qb), "%d of %d",
+                          st.queue_index + 1,
+                          static_cast<int>(st.queue.size()));
+            if (auto* fs = f_small(st)) ImGui::PushFont(fs);
+            const ImVec2 ts = ImGui::CalcTextSize(qb);
+            center_x(content_w, ts.x);
+            ImGui::TextDisabled("%s", qb);
+            if (f_small(st)) ImGui::PopFont();
         }
     }
 
-    // Gapless "next up" hint when a preload is staged.
-    if (!st.pending_preload_path.empty()) {
-        const auto stem = st.pending_preload_path.stem().string();
-        ImGui::TextColored(kMuted, "\xe2\x8f\xad  %s", stem.c_str());
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("gapless preloaded: %s",
-                              st.pending_preload_path.c_str());
-    }
+    ImGui::Dummy(ImVec2(0, 14));
 
-    // Time / progress
+    // ── seekbar ─────────────────────────────────────────────────────────────
     const std::int64_t total_ms = snap.source.duration.count();
     const std::int64_t track_frames =
         static_cast<std::int64_t>(snap.output.frames_written) -
@@ -363,299 +728,97 @@ void draw_main_view(AppState& st) {
     const std::int64_t elapsed_ms = snap.source.sample_rate_hz > 0
         ? (track_frames * 1000LL) / static_cast<std::int64_t>(snap.source.sample_rate_hz)
         : 0;
-    char tbuf[24], dbuf[24];
-    format_time(elapsed_ms, tbuf, sizeof(tbuf));
-    format_time(total_ms, dbuf, sizeof(dbuf));
-    ImGui::Text("%s / %s", tbuf, dbuf);
-    float frac = total_ms > 0
+    const float frac = total_ms > 0
         ? std::clamp(static_cast<float>(elapsed_ms) / static_cast<float>(total_ms), 0.0f, 1.0f)
         : 0.0f;
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    if (ImGui::SliderFloat("##seek", &frac, 0.0f, 1.0f, "") &&
-        st.engine_ != nullptr && snap.source.total_frames > 0) {
-        const auto target = static_cast<std::uint64_t>(
-            frac * static_cast<float>(snap.source.total_frames));
-        (void)st.engine_->seek(target);
-        if (st.dbus_ && snap.source.sample_rate_hz > 0) {
-            const auto pos_us = static_cast<std::int64_t>(
-                (target * 1'000'000ULL) / snap.source.sample_rate_hz);
-            st.dbus_->notify_seeked(pos_us);
-        }
-    }
-    if (ImGui::IsItemHovered() && total_ms > 0) {
-        const float hover_frac = (ImGui::GetMousePos().x - ImGui::GetItemRectMin().x) /
-                                 (ImGui::GetItemRectMax().x - ImGui::GetItemRectMin().x);
-        const std::int64_t hover_ms = static_cast<std::int64_t>(
-            std::clamp(hover_frac, 0.0f, 1.0f) * static_cast<float>(total_ms));
-        char htbuf[24];
-        format_time(hover_ms, htbuf, sizeof(htbuf));
-        ImGui::SetTooltip("%s", htbuf);
-    }
-    // Waveform overlay — drawn into the seek slider's bounding rect.
-    if (st.waveform_ready.load(std::memory_order_acquire)) {
-        const ImVec2 rmin = ImGui::GetItemRectMin();
-        const ImVec2 rmax = ImGui::GetItemRectMax();
-        std::lock_guard lk(st.waveform_mtx);
-        if (!st.waveform.empty()) {
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            const float w   = rmax.x - rmin.x;
-            const float h   = rmax.y - rmin.y;
-            const float cy  = (rmin.y + rmax.y) * 0.5f;
-            const auto  N   = static_cast<float>(st.waveform.size());
-            const float bw  = w / N;
-            constexpr ImU32 kWave = IM_COL32(100, 200, 140, 55);
-            for (std::size_t i = 0; i < st.waveform.size(); ++i) {
-                const float v  = st.waveform[i];
-                const float x0 = rmin.x + static_cast<float>(i) * bw;
-                const float hh = v * h * 0.5f;
-                dl->AddRectFilled({x0, cy - hh}, {x0 + bw, cy + hh}, kWave);
-            }
-        }
-    }
 
-    if (snap.ring.capacity_bytes > 0) {
-        const float ring_fill = std::clamp(
-            static_cast<float>(snap.ring.fill_bytes) /
-            static_cast<float>(snap.ring.capacity_bytes),
-            0.0f, 1.0f);
-        // Green when healthy (>25%), yellow when low, red when nearly empty.
-        ImVec4 ring_col;
-        if (ring_fill > 0.25f)      ring_col = {0.20f, 0.70f, 0.30f, 1.0f};
-        else if (ring_fill > 0.08f) ring_col = {0.80f, 0.65f, 0.10f, 1.0f};
-        else                        ring_col = {0.80f, 0.20f, 0.15f, 1.0f};
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ring_col);
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::ProgressBar(ring_fill, ImVec2(-FLT_MIN, 3.0f), "");
-        ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("ring buffer %.0f%% full  (%zu / %zu bytes)",
-                              static_cast<double>(ring_fill) * 100.0,
-                              snap.ring.fill_bytes,
-                              snap.ring.capacity_bytes);
-        }
-    }
-
-    // Spectrum analyser
-    if (st.engine_ != nullptr) {
-        auto* sring = st.engine_->spectrum_ring();
-        if (sring != nullptr) {
-            float tmp[512];
-            const std::size_t avail = sring->readable();
-            if (avail >= sizeof(float)) {
-                const std::size_t take = std::min(avail, sizeof(tmp));
-                auto sp = std::span<std::byte>(reinterpret_cast<std::byte*>(tmp), take);
-                const std::size_t got = sring->read(sp);
-                g_spectrum.ingest(tmp, got / sizeof(float));
-            }
-            g_spectrum.compute(snap.source.sample_rate_hz);
-        }
-    }
-
-    // Draw bars
     {
-        const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-        const float bar_total_w = ImGui::GetContentRegionAvail().x;
-        const float bar_h_max = 48.0f;
-        const float bar_w = bar_total_w / static_cast<float>(SpectrumState::BARS);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-
-        constexpr ImU32 kBarCol  = IM_COL32(80, 200, 120, 200);
-        constexpr ImU32 kPeakCol = IM_COL32(200, 240, 200, 180);
-
-        for (int b = 0; b < SpectrumState::BARS; ++b) {
-            const auto bi = static_cast<std::size_t>(b);
-            const float x0 = canvas_pos.x + static_cast<float>(b) * bar_w + 1.0f;
-            const float x1 = canvas_pos.x + static_cast<float>(b + 1) * bar_w - 1.0f;
-            const float mag = g_spectrum.magnitudes[bi];
-            const float pk  = g_spectrum.peaks[bi];
-            const float bot = canvas_pos.y + bar_h_max;
-            const float top = canvas_pos.y + bar_h_max * (1.0f - mag);
-            if (top < bot)
-                dl->AddRectFilled({x0, top}, {x1, bot}, kBarCol);
-            const float pk_y = canvas_pos.y + bar_h_max * (1.0f - pk);
-            if (pk > 0.01f)
-                dl->AddLine({x0, pk_y}, {x1, pk_y}, kPeakCol);
+        const float seek_w = std::min(content_w - 80.0f, 720.0f);
+        const float seek_x = ImGui::GetCursorPosX() + (content_w - seek_w) * 0.5f;
+        ImGui::SetCursorPosX(seek_x);
+        // Get the DominantColor at this point; it was cached by compute_dominant.
+        const AlbumArt& art = art_for_track(std::filesystem::path{snap.source.file_path});
+        DominantColor dc = compute_dominant(snap.source.file_path, art);
+        float target = frac;
+        const bool committed = draw_seekbar(st, snap, frac, seek_w, dc, target);
+        if (committed && snap.source.total_frames > 0) {
+            const auto tgt = static_cast<std::uint64_t>(
+                target * static_cast<float>(snap.source.total_frames));
+            (void)st.engine_->seek(tgt);
+            if (st.dbus_ && snap.source.sample_rate_hz > 0) {
+                const auto pos_us = static_cast<std::int64_t>(
+                    (tgt * 1'000'000ULL) / snap.source.sample_rate_hz);
+                st.dbus_->notify_seeked(pos_us);
+            }
         }
-        ImGui::Dummy({bar_total_w, bar_h_max + 2.0f});
+
+        // Time labels: current (left) / duration (right), flanking the bar.
+        char tbuf[24], dbuf[24];
+        format_time(elapsed_ms, tbuf, sizeof(tbuf));
+        format_time(total_ms,   dbuf, sizeof(dbuf));
+        if (auto* fs = f_small(st)) ImGui::PushFont(fs);
+        ImGui::Dummy(ImVec2(0, 4));
+        ImGui::SetCursorPosX(seek_x);
+        ImGui::TextDisabled("%s", tbuf);
+        ImGui::SameLine();
+        const ImVec2 dts = ImGui::CalcTextSize(dbuf);
+        ImGui::SetCursorPosX(seek_x + seek_w - dts.x);
+        ImGui::TextDisabled("%s", dbuf);
+        if (f_small(st)) ImGui::PopFont();
     }
 
-    // Lyrics — load on track change, display current line.
+    ImGui::Dummy(ImVec2(0, 14));
+
+    // ── transport row (icon-only) ──────────────────────────────────────────
     {
-        const std::filesystem::path cur_path{snap.source.file_path};
-        if (cur_path != st.lyrics_loaded_for) {
-            st.lyrics_loaded_for = cur_path;
-            st.lyrics = cur_path.empty() ? Lyrics{} : load_lyrics(cur_path);
-        }
-        if (st.lyrics.loaded) {
-            const int li = current_lyric_line(st.lyrics, elapsed_ms);
-            ImGui::Spacing();
-            if (ImGui::CollapsingHeader("Lyrics", ImGuiTreeNodeFlags_DefaultOpen)) {
-                const ImVec2 avail = ImGui::GetContentRegionAvail();
-                ImGui::BeginChild("##lyrics", ImVec2(0, std::min(avail.y, 120.0f)),
-                                  ImGuiChildFlags_Border);
-                constexpr ImVec4 kActive{0.95f, 0.95f, 0.95f, 1.0f};
-                constexpr ImVec4 kDim{0.55f, 0.55f, 0.60f, 1.0f};
-                for (int i = 0; i < static_cast<int>(st.lyrics.lines.size()); ++i) {
-                    const bool active = (i == li);
-                    ImGui::TextColored(active ? kActive : kDim,
-                                       "%s", st.lyrics.lines[static_cast<std::size_t>(i)].text.c_str());
-                    if (active) ImGui::SetScrollHereY(0.5f);
-                }
-                ImGui::EndChild();
-            }
-        }
-    }
+        constexpr float kBtn = 48.0f;
+        constexpr float kPlayBtn = 60.0f;  // emphasised centre button
+        constexpr float kGap = 18.0f;
+        const float row_w = kBtn + kGap + kPlayBtn + kGap + kBtn;
+        const float row_x = ImGui::GetCursorPosX() + (content_w - row_w) * 0.5f;
+        const float y0 = ImGui::GetCursorPosY();
+        const ImVec4 col = ImGui::GetStyle().Colors[ImGuiCol_Text];
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Transport row
-    const bool playing = (snap.engine_state == engine::State::Playing);
-    if (ImGui::Button(playing ? "Pause" : "Play")) {
-        if (st.engine_ != nullptr) {
-            if (playing) {
-                (void)st.engine_->pause();
-            } else {
-                (void)st.engine_->play();
-            }
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Stop")) {
-        if (st.engine_ != nullptr) {
-            (void)st.engine_->stop();
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Prev")) {
-        if (st.engine_ != nullptr) {
+        // prev
+        ImGui::SetCursorPos(ImVec2(row_x, y0 + (kPlayBtn - kBtn) * 0.5f));
+        if (icon_button("prev", kGlyphPrev, f_icon(st), kBtn, col, false)) {
             { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
-            if (auto prev = st.queue_previous(); prev) {
-                (void)st.engine_->load(*prev);
+            if (auto p = st.queue_previous(); p) {
+                (void)st.engine_->load(*p);
                 (void)st.engine_->play();
                 if (st.dbus_) st.dbus_->notify_track_loaded();
             }
         }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Next")) {
-        if (st.engine_ != nullptr) {
+
+        // play / pause (emphasised)
+        const bool playing = (snap.engine_state == engine::State::Playing);
+        ImGui::SetCursorPos(ImVec2(row_x + kBtn + kGap, y0));
+        if (icon_button("playpause", playing ? kGlyphPause : kGlyphPlay,
+                        f_icon(st), kPlayBtn, col, true)) {
+            if (playing) (void)st.engine_->pause();
+            else         (void)st.engine_->play();
+        }
+
+        // next
+        ImGui::SetCursorPos(ImVec2(row_x + kBtn + kGap + kPlayBtn + kGap,
+                                   y0 + (kPlayBtn - kBtn) * 0.5f));
+        if (icon_button("next", kGlyphNext, f_icon(st), kBtn, col, false)) {
             { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
-            if (auto next = st.queue_next(); next) {
-                (void)st.engine_->load(*next);
+            if (auto n = st.queue_next(); n) {
+                (void)st.engine_->load(*n);
                 (void)st.engine_->play();
                 if (st.dbus_) st.dbus_->notify_track_loaded();
             }
         }
+        // Leave a gap below the transport row.
+        ImGui::SetCursorPosY(y0 + kPlayBtn + 12.0f);
     }
 
-    ImGui::SameLine();
-    verdict_badge(snap);
-
-    ImGui::SameLine();
-    if (ImGui::Button("Release DAC")) {
-        st.release_dac_requested = true;
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Stop playback and release exclusive ALSA hold so "
-                          "other apps can use the DAC.");
-    }
-
-    ImGui::SameLine();
-    // Shuffle toggle
-    if (st.shuffle) ImGui::PushStyleColor(ImGuiCol_Button, kPass);
-    if (ImGui::SmallButton("shuf")) {
-        st.queue_shuffle_toggle();
-        if (st.dbus_) {
-            st.dbus_->notify_shuffle_changed();
-        }
-    }
-    if (st.shuffle) ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("shuffle: %s", st.shuffle ? "on" : "off");
-
-    ImGui::SameLine();
-    // Repeat mode cycling: None → One → All → None
-    const char* rep_label = "rep:off";
-    if (st.repeat_mode == AppState::RepeatMode::One) rep_label = "rep:1";
-    else if (st.repeat_mode == AppState::RepeatMode::All) rep_label = "rep:all";
-    const bool rep_active = (st.repeat_mode != AppState::RepeatMode::None);
-    if (rep_active) ImGui::PushStyleColor(ImGuiCol_Button, kPass);
-    if (ImGui::SmallButton(rep_label)) {
-        {
-            std::lock_guard lk(st.queue_mtx);
-            switch (st.repeat_mode) {
-            case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One; break;
-            case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All; break;
-            case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
-            }
-        }
-        st.refresh_preload();
-        if (st.dbus_) {
-            st.dbus_->notify_loop_status_changed();
-        }
-    }
-    if (rep_active) ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("repeat mode");
-
-    ImGui::Spacing();
-
-    dac_combo(st);
-
-    // HW volume slider — cached at ~4 Hz to avoid opening ALSA mixer every frame
-    ImGui::Spacing();
-    {
-        const auto& hw_string = snap.device.current_hw_string;
-        const auto& vol = snap.device.capabilities.hw_volume;
-        if (vol.present && !hw_string.empty()) {
-            const auto now = std::chrono::steady_clock::now();
-            if (st.hw_volume_pct < 0 ||
-                now - st.hw_volume_last_poll > std::chrono::milliseconds(250)) {
-                st.hw_volume_pct = engine::get_hw_volume_pct(hw_string);
-                if (st.hw_volume_pct < 0) { st.hw_volume_pct = 0; }
-                st.hw_volume_muted = engine::get_hw_mute_state(hw_string);
-                st.hw_volume_last_poll = now;
-            }
-            int pct = st.hw_volume_pct;
-            if (st.hw_volume_muted) {
-                ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.2f, 1.0f), "VOL  muted");
-            } else {
-                ImGui::TextColored(kMuted, "VOL  %d%%", pct);
-            }
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::SliderInt("##vol", &pct, 0, 100, "%d%%")) {
-                st.hw_volume_pct = pct;
-                engine::set_hw_volume_pct(hw_string, pct);
-                if (st.dbus_) { st.dbus_->notify_volume_changed(); }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Mute")) {
-                engine::toggle_hw_mute(hw_string);
-                st.hw_volume_last_poll = {};
-                if (st.dbus_) { st.dbus_->notify_volume_changed(); }
-            }
-            if (vol.has_db_scale) {
-                ImGui::SameLine();
-                ImGui::TextColored(kMuted, "HW  %.0f..%.0f dB",
-                    static_cast<double>(vol.min_db_x100) / 100.0,
-                    static_cast<double>(vol.max_db_x100) / 100.0);
-            }
-        } else if (!hw_string.empty()) {
-            ImGui::TextColored(kMuted, "Vol: no HW control — use alsamixer");
-        }
-    }
-
-    // Event log preview
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextColored(kMuted, "events:");
-    const auto entries = st.snapshot_log(6);
-    for (const auto& e : entries) {
-        ImGui::TextWrapped("%s", e.text.c_str());
-    }
+    // ── status footer ──────────────────────────────────────────────────────
+    draw_status_footer(st, snap);
 }
 
+// ── mini view (compact horizontal bar) ──────────────────────────────────────
 void draw_mini_view(AppState& st) {
     engine::PipelineSnapshot snap{};
     if (st.engine_) snap = st.engine_->pipeline_snapshot();
@@ -663,20 +826,17 @@ void draw_mini_view(AppState& st) {
     if (ImGui::SmallButton("full")) { st.mini_mode = false; }
     ImGui::SameLine();
 
-    // Title — Artist (or fallback to filename stem)
-    {
-        std::string display;
-        if (!snap.source.tags.title.empty()) {
-            display = snap.source.tags.title;
-            if (!snap.source.tags.artist.empty())
-                display += "  \xe2\x80\x94  " + snap.source.tags.artist;
-        } else if (!snap.source.file_path.empty()) {
-            display = std::filesystem::path{snap.source.file_path}.stem().string();
-        } else {
-            display = "\xe2\x80\x94";
-        }
-        ImGui::TextColored(kMuted, "%s", display.c_str());
+    std::string display;
+    if (!snap.source.tags.title.empty()) {
+        display = snap.source.tags.title;
+        if (!snap.source.tags.artist.empty())
+            display += "  \xc2\xb7  " + snap.source.tags.artist;
+    } else if (!snap.source.file_path.empty()) {
+        display = std::filesystem::path{snap.source.file_path}.stem().string();
+    } else {
+        display = "\xe2\x80\x94";
     }
+    ImGui::TextUnformatted(display.c_str());
     ImGui::SameLine();
 
     const std::int64_t total_ms = snap.source.duration.count();
@@ -687,18 +847,16 @@ void draw_mini_view(AppState& st) {
     char tbuf[24], dbuf[24];
     format_time(elapsed_ms < 0 ? 0 : elapsed_ms, tbuf, sizeof(tbuf));
     format_time(total_ms, dbuf, sizeof(dbuf));
-    ImGui::TextColored(kMuted, "%s/%s", tbuf, dbuf);
+    ImGui::TextDisabled("%s / %s", tbuf, dbuf);
     ImGui::SameLine();
 
     const bool playing = (snap.engine_state == engine::State::Playing);
     if (st.engine_) {
-        if (ImGui::SmallButton(playing ? "\xe2\x8f\xb8" : "\xe2\x8f\xb5")) {
+        if (ImGui::SmallButton(playing ? kGlyphPause : kGlyphPlay)) {
             playing ? (void)st.engine_->pause() : (void)st.engine_->play();
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("\xe2\x8f\xb9")) { (void)st.engine_->stop(); }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("\xe2\x8f\xae")) {
+        if (ImGui::SmallButton(kGlyphPrev)) {
             { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto p = st.queue_previous(); p) {
                 (void)st.engine_->load(*p);
@@ -707,7 +865,7 @@ void draw_mini_view(AppState& st) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("\xe2\x8f\xad")) {
+        if (ImGui::SmallButton(kGlyphNext)) {
             { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto n = st.queue_next(); n) {
                 (void)st.engine_->load(*n);
@@ -719,12 +877,11 @@ void draw_mini_view(AppState& st) {
         verdict_badge(snap);
     }
 
-    // Thin progress strip
     if (total_ms > 0) {
-        const float frac = std::clamp(
-            static_cast<float>(elapsed_ms < 0 ? 0 : elapsed_ms) / static_cast<float>(total_ms),
-            0.0f, 1.0f);
-        ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 3.0f), "");
+        const float fr = std::clamp(
+            static_cast<float>(elapsed_ms < 0 ? 0 : elapsed_ms) /
+            static_cast<float>(total_ms), 0.0f, 1.0f);
+        ImGui::ProgressBar(fr, ImVec2(-FLT_MIN, 3.0f), "");
     }
 }
 

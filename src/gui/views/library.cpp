@@ -21,9 +21,11 @@ namespace transporter::gui {
 
 namespace {
 
-constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
+// Matches the global TextDisabled colour applied by theme.cpp. Kept as a
+// local constant for the few places that need to colour text inline.
+constexpr ImVec4 kMuted{0.62f, 0.62f, 0.66f, 1.0f};
 
-constexpr float kThumbSize = 64.0f;
+constexpr float kThumbSize = 72.0f;
 
 // Format a millisecond duration as H:MM:SS or M:SS.
 std::string fmt_dur(std::chrono::milliseconds ms) {
