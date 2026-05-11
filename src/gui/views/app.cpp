@@ -208,6 +208,12 @@ std::optional<std::filesystem::path> AppState::queue_peek_next() const {
     if (repeat_mode == RepeatMode::One) {
         return queue[static_cast<std::size_t>(queue_index)];
     }
+    // Shuffle picks a random track; the next slot is unpredictable, so skip
+    // the preload rather than staging a track that will almost certainly be
+    // cancelled when queue_next() draws a different entry.
+    if (shuffle) {
+        return std::nullopt;
+    }
     const std::int32_t next = queue_index + 1;
     if (next >= static_cast<std::int32_t>(queue.size())) {
         if (repeat_mode == RepeatMode::All) {
