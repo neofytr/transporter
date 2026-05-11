@@ -614,6 +614,7 @@ bool maybe_play_queued_file(AppState& st) {
             std::lock_guard lk(st.queue_mtx);
             st.queue = std::move(tracks);
             st.queue_index = 0;
+            st.pending_preload_path.clear();
         }
         st.recompute_queue_duration();
         const std::filesystem::path first = [&] {
@@ -1085,6 +1086,7 @@ int run(const AppArgs& args) {
                 wire_engine_events(st);
                 st.push_log("switched to: " + new_dev);
                 if (!reload_path.empty()) {
+                    { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
                     if (auto lr = st.engine_->load(reload_path); lr) {
                         st.engine_->play();
                         st.push_log("loaded: " + reload_path.string());
