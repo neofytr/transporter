@@ -518,9 +518,16 @@ void wire_engine_events(AppState& st) {
                 std::lock_guard lk(st.queue_mtx);
                 if (!st.pending_preload_path.empty() &&
                     ev.file_path == st.pending_preload_path) {
-                    if (st.queue_index + 1 <
-                            static_cast<std::int32_t>(st.queue.size())) {
-                        ++st.queue_index;
+                    // Advance queue_index to match the preloaded slot.
+                    // Mirrors queue_peek_next logic: repeat-one stays put,
+                    // repeat-all wraps, repeat-none stops at end.
+                    if (st.repeat_mode != AppState::RepeatMode::One) {
+                        const std::int32_t next = st.queue_index + 1;
+                        if (next < static_cast<std::int32_t>(st.queue.size())) {
+                            st.queue_index = next;
+                        } else if (st.repeat_mode == AppState::RepeatMode::All) {
+                            st.queue_index = 0;
+                        }
                     }
                 }
                 st.pending_preload_path.clear();
@@ -532,7 +539,7 @@ void wire_engine_events(AppState& st) {
                 auto peek = st.queue_peek_next();
                 {
                     std::lock_guard lk(st.queue_mtx);
-                    st.pending_preload_path = peek ? peek->string() : std::string{};
+                    st.pending_preload_path = peek ? *peek : std::filesystem::path{};
                 }
                 if (peek) {
                     (void)st.engine_->preload(*peek);
