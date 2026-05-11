@@ -63,6 +63,11 @@ public:
     // transition.
     void notify_state(transporter::engine::State s);
 
+    // Emit PropertiesChanged for Shuffle / LoopStatus so connected clients
+    // (status bars, playerctl watchers) pick up GUI-driven changes promptly.
+    void notify_shuffle();
+    void notify_loop_status();
+
 private:
     void register_vtable();
     std::map<std::string, sdbus::Variant>

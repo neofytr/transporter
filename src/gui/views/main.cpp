@@ -554,6 +554,9 @@ void draw_main_view(AppState& st) {
     if (st.shuffle) ImGui::PushStyleColor(ImGuiCol_Button, kPass);
     if (ImGui::SmallButton("shuf")) {
         st.queue_shuffle_toggle();
+        if (st.dbus_) {
+            st.dbus_->notify_shuffle_changed();
+        }
     }
     if (st.shuffle) ImGui::PopStyleColor();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("shuffle: %s", st.shuffle ? "on" : "off");
@@ -570,6 +573,9 @@ void draw_main_view(AppState& st) {
         case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One; break;
         case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All; break;
         case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+        }
+        if (st.dbus_) {
+            st.dbus_->notify_loop_status_changed();
         }
     }
     if (rep_active) ImGui::PopStyleColor();

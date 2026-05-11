@@ -160,6 +160,18 @@ void MprisPlayer::notify_state(transporter::engine::State s) {
     }
 }
 
+void MprisPlayer::notify_shuffle() {
+    try {
+        obj_.emitPropertiesChangedSignal(kIface, {sdbus::PropertyName{"Shuffle"}});
+    } catch (const sdbus::Error&) {}
+}
+
+void MprisPlayer::notify_loop_status() {
+    try {
+        obj_.emitPropertiesChangedSignal(kIface, {sdbus::PropertyName{"LoopStatus"}});
+    } catch (const sdbus::Error&) {}
+}
+
 void MprisPlayer::register_vtable() {
     auto post_play = [this] {
         if (engine_) {

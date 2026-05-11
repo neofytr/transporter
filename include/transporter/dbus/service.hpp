@@ -75,6 +75,11 @@ public:
     // immediately on load is an optimization, not a correctness requirement.
     void notify_track_loaded();
 
+    // Emit MPRIS PropertiesChanged for Shuffle / LoopStatus. Call from the
+    // GUI thread whenever the user toggles these via the UI controls.
+    void notify_shuffle_changed();
+    void notify_loop_status_changed();
+
     // Invoke from the controlling object when an externally-driven Quit
     // happens (Ctrl-C, GUI close, etc.) so the service stops emitting before
     // the engine goes away.

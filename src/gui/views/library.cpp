@@ -236,19 +236,19 @@ void draw_library_view(AppState& st) {
                     ImGui::SetNextItemOpen(sel, ImGuiCond_Always);
 
                     // Build album duration string for header.
-                    char alb_dur_str[20] = {};
+                    char alb_dur_str[32] = {};
                     if (auto tracks_hdr = st.library_->tracks_in_album(al.id); tracks_hdr && !tracks_hdr->empty()) {
                         std::chrono::milliseconds album_dur{0};
                         for (const auto& tr : *tracks_hdr) album_dur += tr.duration;
                         if (album_dur.count() > 0) {
                             const std::int64_t s = album_dur.count() / 1000;
                             const std::int64_t m = s / 60;
-                            if (m >= 60) std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld:%02lld", m/60, m%60, s%60);
-                            else         std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld", m, s%60);
+                            if (m >= 60) std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld:%02lld", static_cast<long long>(m/60), static_cast<long long>(m%60), static_cast<long long>(s%60));
+                            else         std::snprintf(alb_dur_str, sizeof(alb_dur_str), "  %lld:%02lld", static_cast<long long>(m), static_cast<long long>(s%60));
                         }
                     }
 
-                    char hdr2[160];
+                    char hdr2[192];
                     std::snprintf(hdr2, sizeof(hdr2), "%s%s", hdr, alb_dur_str);
 
                     if (ImGui::CollapsingHeader(hdr2)) {
@@ -280,7 +280,7 @@ void draw_library_view(AppState& st) {
                                 }
                                 if (tr.duration.count() > 0) {
                                     const std::int64_t s = tr.duration.count() / 1000;
-                                    char dur[12];
+                                    char dur[20];
                                     std::snprintf(dur, sizeof(dur), "%lld:%02lld",
                                                   static_cast<long long>(s / 60),
                                                   static_cast<long long>(s % 60));

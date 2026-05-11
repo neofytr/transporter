@@ -103,6 +103,18 @@ void DbusService::notify_track_loaded() {
     }
 }
 
+void DbusService::notify_shuffle_changed() {
+    if (impl_ && impl_->player) {
+        impl_->player->notify_shuffle();
+    }
+}
+
+void DbusService::notify_loop_status_changed() {
+    if (impl_ && impl_->player) {
+        impl_->player->notify_loop_status();
+    }
+}
+
 void DbusService::Impl::poll_loop() {
     using namespace std::chrono_literals;
     while (!stop_flag.load(std::memory_order_acquire)) {

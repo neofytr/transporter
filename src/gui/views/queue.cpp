@@ -82,7 +82,7 @@ void draw_queue_view(AppState& st) {
         char label[512];
         std::snprintf(label, sizeof(label), "%d  %s",
                       i + 1,
-                      snap_queue[i].stem().string().c_str());
+                      snap_queue[static_cast<std::size_t>(i)].stem().string().c_str());
 
         if (ImGui::Selectable(label, current)) {
             st.queue_jump_to(i);
