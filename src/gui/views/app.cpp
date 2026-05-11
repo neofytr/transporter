@@ -8,6 +8,7 @@
 
 #include <transporter/config/config.hpp>
 #include <transporter/dbus/service.hpp>
+#include <transporter/engine/decoder_factory.hpp>
 #include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/error.hpp>
@@ -19,14 +20,18 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -262,6 +267,82 @@ void wire_engine_events(AppState& st) {
                           event_kind_name(ev.kind),
                           ev.format.sample_rate_hz, ev.format.channels,
                           static_cast<unsigned long long>(ev.total_frames));
+            // Cancel any previous scanner and start a fresh one for the new file.
+            st.waveform_ready.store(false, std::memory_order_relaxed);
+            { std::lock_guard lk(st.waveform_mtx); st.waveform.clear(); }
+            st.waveform_scanner = std::jthread([&st, fpath = ev.file_path](std::stop_token stop) {
+                auto res = engine::open_decoder(fpath);
+                if (!res) return;
+                auto& dec = *res;
+                const std::uint64_t total = dec->total_frames();
+                if (total == 0) return;
+                const engine::PcmFormat fmt = dec->format();
+                if (fmt.channels == 0 || fmt.frame_bytes() == 0) return;
+
+                constexpr std::size_t N = 256;
+                std::vector<double> sums(N, 0.0);
+                std::vector<std::uint64_t> counts(N, 0);
+
+                constexpr std::size_t CHUNK = 4096;
+                std::vector<std::byte> buf(CHUNK * fmt.frame_bytes());
+                std::uint64_t frame = 0;
+
+                while (!stop.stop_requested()) {
+                    auto rd = dec->read(std::span{buf}, CHUNK);
+                    if (!rd || *rd == 0) break;
+                    const std::size_t got = *rd;
+                    for (std::size_t f = 0; f < got && !stop.stop_requested(); ++f, ++frame) {
+                        const std::size_t bucket = static_cast<std::size_t>(
+                            (frame * N) / total);
+                        if (bucket >= N) continue;
+                        const std::byte* src = buf.data() + f * fmt.frame_bytes();
+                        float s = 0.0f;
+                        using SF = engine::SampleFormat;
+                        switch (fmt.sample_format) {
+                        case SF::S16_LE: {
+                            std::int16_t v = 0;
+                            std::memcpy(&v, src, 2);
+                            s = v / 32768.0f;
+                            break;
+                        }
+                        case SF::S24_3LE: {
+                            std::int32_t v = 0;
+                            std::memcpy(reinterpret_cast<std::byte*>(&v), src, 3);
+                            if (v & 0x800000) v |= static_cast<std::int32_t>(0xFF000000u);
+                            s = static_cast<float>(v) / 8388608.0f;
+                            break;
+                        }
+                        case SF::S24_LE:
+                        case SF::S32_LE: {
+                            std::int32_t v = 0;
+                            std::memcpy(&v, src, 4);
+                            s = static_cast<float>(v) / 2147483648.0f;
+                            break;
+                        }
+                        case SF::FLOAT_LE:
+                            std::memcpy(&s, src, 4);
+                            break;
+                        }
+                        sums[bucket] += static_cast<double>(s) * static_cast<double>(s);
+                        counts[bucket]++;
+                    }
+                }
+
+                if (stop.stop_requested()) return;
+
+                std::vector<float> env(N);
+                float peak = 0.0f;
+                for (std::size_t i = 0; i < N; ++i) {
+                    env[i] = counts[i] > 0
+                        ? static_cast<float>(std::sqrt(sums[i] / static_cast<double>(counts[i])))
+                        : 0.0f;
+                    peak = std::max(peak, env[i]);
+                }
+                if (peak > 0.0f) for (auto& v : env) v /= peak;
+
+                { std::lock_guard lk(st.waveform_mtx); st.waveform = std::move(env); }
+                st.waveform_ready.store(true, std::memory_order_release);
+            });
             // If the loaded file matches the preloaded path, a gapless swap
             // just occurred: advance queue_index to reflect the new position.
             if (!st.pending_preload_path.empty() &&
@@ -472,6 +553,46 @@ void handle_view_shortcuts(AppState& st) {
         case ViewId::Library:  st.current_view = ViewId::Pipeline; break;
         case ViewId::Pipeline: st.current_view = ViewId::Queue;    break;
         case ViewId::Queue:    st.current_view = ViewId::Main;     break;
+        }
+    }
+
+    // Transport shortcuts — Ctrl+arrow skips tracks; bare arrow seeks ±5 s.
+    if (!st.engine_) return;
+
+    const auto eng_state = st.last_engine_state.load(std::memory_order_relaxed);
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+        if (eng_state == engine::State::Playing) (void)st.engine_->pause();
+        else                                     (void)st.engine_->play();
+    }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
+        if (io.KeyCtrl) {
+            if (auto n = st.queue_next()) { (void)st.engine_->load(*n); (void)st.engine_->play(); }
+        } else {
+            const auto snap = st.engine_->pipeline_snapshot();
+            if (snap.source.sample_rate_hz > 0) {
+                const std::uint64_t fw = snap.output.frames_written
+                                       - snap.output.frames_written_at_track_start;
+                const std::uint64_t target =
+                    std::min(fw + 5 * static_cast<std::uint64_t>(snap.source.sample_rate_hz),
+                             snap.source.total_frames);
+                (void)st.engine_->seek(target);
+            }
+        }
+    }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
+        if (io.KeyCtrl) {
+            if (auto p = st.queue_previous()) { (void)st.engine_->load(*p); (void)st.engine_->play(); }
+        } else {
+            const auto snap = st.engine_->pipeline_snapshot();
+            if (snap.source.sample_rate_hz > 0) {
+                const std::uint64_t fw = snap.output.frames_written
+                                       - snap.output.frames_written_at_track_start;
+                const std::uint64_t back = 5 * static_cast<std::uint64_t>(snap.source.sample_rate_hz);
+                (void)st.engine_->seek(fw > back ? fw - back : 0);
+            }
         }
     }
 }

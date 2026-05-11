@@ -17,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace transporter::gui {
@@ -47,6 +48,13 @@ struct AppState {
 
     std::filesystem::path queued_file;  // launch arg, played once
     std::filesystem::path pending_preload_path; // path passed to last preload()
+
+    // Waveform amplitude envelope computed by background scanner.
+    // 256 RMS buckets, values in [0, 1], normalised to the loudest bucket.
+    std::mutex waveform_mtx;
+    std::vector<float> waveform;
+    std::atomic<bool> waveform_ready{false};
+    std::jthread waveform_scanner;  // destruction requests stop
 
     // In-process queue. Phase 10 keeps it minimal: command-line file lands
     // here on launch, OpenUri appends, MPRIS Next/Previous walks it. Index

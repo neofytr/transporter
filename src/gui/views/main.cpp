@@ -304,6 +304,27 @@ void draw_main_view(AppState& st) {
             frac * static_cast<float>(snap.source.total_frames));
         (void)st.engine_->seek(target);
     }
+    // Waveform overlay — drawn into the seek slider's bounding rect.
+    if (st.waveform_ready.load(std::memory_order_acquire)) {
+        const ImVec2 rmin = ImGui::GetItemRectMin();
+        const ImVec2 rmax = ImGui::GetItemRectMax();
+        std::lock_guard lk(st.waveform_mtx);
+        if (!st.waveform.empty()) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const float w   = rmax.x - rmin.x;
+            const float h   = rmax.y - rmin.y;
+            const float cy  = (rmin.y + rmax.y) * 0.5f;
+            const auto  N   = static_cast<float>(st.waveform.size());
+            const float bw  = w / N;
+            constexpr ImU32 kWave = IM_COL32(100, 200, 140, 55);
+            for (std::size_t i = 0; i < st.waveform.size(); ++i) {
+                const float v  = st.waveform[i];
+                const float x0 = rmin.x + static_cast<float>(i) * bw;
+                const float hh = v * h * 0.5f;
+                dl->AddRectFilled({x0, cy - hh}, {x0 + bw, cy + hh}, kWave);
+            }
+        }
+    }
 
     if (snap.ring.capacity_bytes > 0) {
         const float ring_fill = std::clamp(
