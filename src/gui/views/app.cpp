@@ -302,9 +302,19 @@ void AppState::recompute_queue_duration() {
         return;
     }
     std::unordered_map<std::string, std::chrono::milliseconds> dur_map;
+    std::unordered_map<std::string, std::string> name_map;
     dur_map.reserve(result->size());
+    name_map.reserve(result->size());
     for (const auto& t : *result) {
         dur_map.emplace(t.path.string(), t.duration);
+        if (!t.title.empty()) {
+            std::string label = t.title;
+            if (!t.artist.empty()) {
+                label += "  \xe2\x80\x94  ";
+                label += t.artist;
+            }
+            name_map.emplace(t.path.string(), std::move(label));
+        }
     }
     std::chrono::milliseconds total{0};
     for (const auto& p : snap) {
@@ -316,6 +326,7 @@ void AppState::recompute_queue_duration() {
     {
         std::lock_guard lk(queue_mtx);
         queue_total_duration = total;
+        queue_display_names = std::move(name_map);
     }
 }
 

@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace transporter::gui {
@@ -65,6 +66,9 @@ struct AppState {
     std::vector<std::filesystem::path> queue;
     std::int32_t queue_index = -1;
     std::chrono::milliseconds queue_total_duration{0};
+    // path.string() → "Title — Artist" (or title-only if no artist).
+    // Populated by recompute_queue_duration(); empty entries fall back to stem.
+    std::unordered_map<std::string, std::string> queue_display_names;
     bool shuffle = false;
     enum class RepeatMode : std::uint8_t { None, One, All };
     RepeatMode repeat_mode = RepeatMode::None;
