@@ -300,6 +300,8 @@ std::expected<void, Error> FlacDecoder::seek_frame(std::uint64_t frame) {
     carry_.clear();
     carry_off_ = 0;
     eof_ = false;
+    error_ = false;
+    error_msg_.clear();
     return {};
 }
 
