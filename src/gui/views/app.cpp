@@ -4,6 +4,7 @@
 // dispatches between the three views.
 
 #include "app.hpp"
+#include "playlist.hpp"
 #include "../platform/platform.hpp"
 
 #include <transporter/config/config.hpp>
@@ -393,10 +394,44 @@ void wire_engine_events(AppState& st) {
     });
 }
 
+static bool is_playlist_ext(const std::filesystem::path& p) {
+    auto ext = p.extension().string();
+    for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return ext == ".m3u" || ext == ".m3u8";
+}
+
 bool maybe_play_queued_file(AppState& st) {
     if (st.queued_file.empty() || st.engine_ == nullptr) {
         return false;
     }
+
+    if (is_playlist_ext(st.queued_file)) {
+        auto tracks = transporter::gui::load_playlist(st.queued_file);
+        st.queued_file.clear();
+        if (tracks.empty()) {
+            return false;
+        }
+        st.queue_set_single(tracks[0]);
+        for (std::size_t i = 1; i < tracks.size(); ++i) {
+            st.queue_append(tracks[i]);
+        }
+        auto lr = st.engine_->load(tracks[0]);
+        if (!lr) {
+            st.push_log(std::string{"queued load failed: "} + lr.error().message);
+            return false;
+        }
+        auto pr = st.engine_->play();
+        if (!pr) {
+            st.push_log(std::string{"queued play failed: "} + pr.error().message);
+        } else {
+            st.push_log("loaded: " + tracks[0].string());
+            if (st.dbus_ != nullptr) {
+                st.dbus_->notify_track_loaded();
+            }
+        }
+        return true;
+    }
+
     auto lr = st.engine_->load(st.queued_file);
     if (!lr) {
         st.push_log(std::string{"queued load failed: "} + lr.error().message);
@@ -637,7 +672,7 @@ int run(const AppArgs& args) {
     st.cfg = load_config_or_defaults(args.config_path);
     st.current_view = default_to_viewid(st.cfg.ui.default_view);
     st.queued_file = args.file_to_play;
-    if (!st.queued_file.empty()) {
+    if (!st.queued_file.empty() && !is_playlist_ext(st.queued_file)) {
         st.queue_set_single(st.queued_file);
     }
 
