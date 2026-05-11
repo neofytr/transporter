@@ -18,6 +18,8 @@
 
 #include <imgui.h>
 
+#include <signal.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -732,6 +734,22 @@ void handle_view_shortcuts(AppState& st) {
 
 int run(const AppArgs& args) {
     AppState st;
+
+    static std::atomic<bool> s_signal_exit{false};
+    struct SigGuard {
+        ~SigGuard() { s_signal_exit.store(false); }
+    };
+    SigGuard sig_guard;
+
+    {
+        struct sigaction sa{};
+        sa.sa_handler = [](int) { s_signal_exit.store(true, std::memory_order_relaxed); };
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGTERM, &sa, nullptr);
+        sigaction(SIGINT,  &sa, nullptr);
+    }
+
     st.config_path = args.config_path;
     st.cfg = load_config_or_defaults(args.config_path);
     st.current_view = default_to_viewid(st.cfg.ui.default_view);
@@ -812,6 +830,11 @@ int run(const AppArgs& args) {
     bool was_mini = false;
 
     while (win.poll()) {
+        if (s_signal_exit.load(std::memory_order_relaxed)) {
+            win.request_close();
+            break;
+        }
+
         const bool ready = backend_ready.load(std::memory_order_acquire);
 
         // Hot DAC switch requested from the combo box
