@@ -486,18 +486,6 @@ void Scanner::walk_root(Db& db, const fs::path& root,
         if (album_artist != tags.artist) {
             // Try to extract the featured artist(s) from the full track artist.
             const std::string& full = tags.artist;
-            const std::string& prim_lc = [&]() -> const std::string& {
-                // album_artist is already primary; build its lowercase version inline
-                static thread_local std::string lc;
-                lc.clear();
-                lc.reserve(album_artist.size());
-                for (char c : album_artist) {
-                    lc.push_back(c >= 'A' && c <= 'Z'
-                                     ? static_cast<char>(c + ('a' - 'A')) : c);
-                }
-                return lc;
-            }();
-            (void)prim_lc;
             // Everything after the separator is the featured part.
             static constexpr const char* kSep[] = {
                 " featuring ", " feat. ", " feat ", " ft. ", " ft ",
