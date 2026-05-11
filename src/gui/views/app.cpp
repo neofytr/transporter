@@ -279,6 +279,7 @@ void AppState::queue_remove(std::int32_t idx) {
         }
     }
     recompute_queue_duration();
+    refresh_preload();
 }
 
 void AppState::refresh_preload() {
