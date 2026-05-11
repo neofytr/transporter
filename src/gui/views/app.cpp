@@ -329,6 +329,7 @@ void AppState::queue_clear() {
     queue.clear();
     queue_index = -1;
     queue_total_duration = std::chrono::milliseconds{0};
+    queue_row_info.clear();
 }
 
 void AppState::queue_shuffle_toggle() {
@@ -549,11 +550,17 @@ bool maybe_play_queued_file(AppState& st) {
         if (tracks.empty()) {
             return false;
         }
-        st.queue_set_single(tracks[0]);
-        for (std::size_t i = 1; i < tracks.size(); ++i) {
-            st.queue_append(tracks[i]);
+        {
+            std::lock_guard lk(st.queue_mtx);
+            st.queue = std::move(tracks);
+            st.queue_index = 0;
         }
-        auto lr = st.engine_->load(tracks[0]);
+        st.recompute_queue_duration();
+        const std::filesystem::path first = [&] {
+            std::lock_guard lk(st.queue_mtx);
+            return st.queue[0];
+        }();
+        auto lr = st.engine_->load(first);
         if (!lr) {
             st.push_log(std::string{"queued load failed: "} + lr.error().message);
             return false;
@@ -562,7 +569,7 @@ bool maybe_play_queued_file(AppState& st) {
         if (!pr) {
             st.push_log(std::string{"queued play failed: "} + pr.error().message);
         } else {
-            st.push_log("loaded: " + tracks[0].string());
+            st.push_log("loaded: " + first.string());
             if (st.dbus_ != nullptr) {
                 st.dbus_->notify_track_loaded();
             }
