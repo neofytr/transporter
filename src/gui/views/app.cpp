@@ -735,6 +735,8 @@ int run(const AppArgs& args) {
             const fs::path sf =
                 fs::path{home} / ".cache" / "transporter" / "session";
             if (std::ifstream f{sf}; f) {
+                std::vector<fs::path> saved_queue;
+                std::int32_t saved_index = -1;
                 std::string line;
                 while (std::getline(f, line)) {
                     if (line.starts_with("shuffle="))
@@ -744,7 +746,24 @@ int run(const AppArgs& args) {
                         if (c == '1') st.repeat_mode = AppState::RepeatMode::One;
                         else if (c == '2') st.repeat_mode = AppState::RepeatMode::All;
                         else st.repeat_mode = AppState::RepeatMode::None;
+                    } else if (line.starts_with("queue_index=")) {
+                        try { saved_index = std::stoi(line.substr(12)); }
+                        catch (...) {}
+                    } else if (line.starts_with("queue=")) {
+                        fs::path p{line.substr(6)};
+                        std::error_code ec;
+                        if (fs::exists(p, ec) && !ec) saved_queue.push_back(std::move(p));
                     }
+                }
+                // Restore queue only when no CLI file was specified.
+                if (args.file_to_play.empty() && !saved_queue.empty()) {
+                    std::lock_guard lk(st.queue_mtx);
+                    st.queue = std::move(saved_queue);
+                    if (saved_index >= 0 &&
+                        saved_index < static_cast<std::int32_t>(st.queue.size()))
+                        st.queue_index = saved_index;
+                    else
+                        st.queue_index = 0;
                 }
             }
         }
@@ -1002,6 +1021,13 @@ int run(const AppArgs& args) {
                     case AppState::RepeatMode::All:  rm = 2; break;
                     }
                     f << "repeat=" << rm << '\n';
+                    // Persist the play queue so it can be resumed on next launch.
+                    {
+                        std::lock_guard lk(st.queue_mtx);
+                        f << "queue_index=" << st.queue_index << '\n';
+                        for (const auto& p : st.queue)
+                            f << "queue=" << p.string() << '\n';
+                    }
                 }
             }
         }
