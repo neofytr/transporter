@@ -274,6 +274,29 @@ void draw_main_view(AppState& st) {
     }
     ImGui::PopFont();
 
+    // Hover the title/filename for full metadata tooltip.
+    if (ImGui::IsItemHovered() && !snap.source.file_path.empty()) {
+        ImGui::BeginTooltip();
+        ImGui::TextDisabled("%s", snap.source.file_path.c_str());
+        ImGui::Separator();
+        if (!snap.source.tags.track_no.empty())
+            ImGui::Text("Track: %s", snap.source.tags.track_no.c_str());
+        if (!snap.source.tags.date.empty())
+            ImGui::Text("Date:  %s", snap.source.tags.date.c_str());
+        if (!snap.source.tags.album_artist.empty() &&
+                snap.source.tags.album_artist != snap.source.tags.artist)
+            ImGui::Text("AA:    %s", snap.source.tags.album_artist.c_str());
+        ImGui::Text("Fmt:   %s  %u Hz  %u ch",
+                    snap.source.codec_name.c_str(),
+                    snap.source.sample_rate_hz,
+                    static_cast<unsigned>(snap.source.channels));
+        if (snap.source.bit_depth_file > 0)
+            ImGui::Text("Depth: %u bit", static_cast<unsigned>(snap.source.bit_depth_file));
+        if (snap.source.bitrate_kbps > 0)
+            ImGui::Text("Rate:  %u kbps", snap.source.bitrate_kbps);
+        ImGui::EndTooltip();
+    }
+
     if (!snap.source.tags.artist.empty()) {
         ImGui::TextColored(kMuted, "%s", snap.source.tags.artist.c_str());
     }
