@@ -1401,7 +1401,7 @@ int run_headless(const AppArgs& args) {
         }
         case engine::Event::Kind::TrackEnded:
             std::printf("ended\n");
-            if (use_playlist) {
+            if (use_playlist && st.engine_ != nullptr) {
                 const int next = playlist_pos.fetch_add(1) + 1;
                 if (next < static_cast<int>(playlist.size())) {
                     (void)st.engine_->load(playlist[static_cast<std::size_t>(next)]);
@@ -1441,6 +1441,8 @@ int run_headless(const AppArgs& args) {
         std::unique_lock lk(mtx);
         cv.wait(lk, [&]{ return done.load(); });
     }
+    st.engine_->set_event_callback({});
+    st.engine_->stop();
     return exit_code;
 }
 
