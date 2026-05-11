@@ -150,6 +150,7 @@ struct AppArgs {
     std::filesystem::path config_path;
     std::filesystem::path file_to_play;
     std::string device_override;
+    bool prefer_cpu = false;  // pass --cpu flag down to WindowConfig
 };
 
 int run(const AppArgs& args);

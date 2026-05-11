@@ -1,7 +1,17 @@
-wayland_client_dep = dependency('wayland-client')
-xkbcommon_dep      = dependency('xkbcommon')
-libpng_dep         = dependency('libpng')
-libjpeg_dep        = dependency('libjpeg')
+wayland_client_dep  = dependency('wayland-client')
+xkbcommon_dep       = dependency('xkbcommon')
+libpng_dep          = dependency('libpng')
+libjpeg_dep         = dependency('libjpeg')
+
+egl_dep         = dependency('egl',         required: false)
+wayland_egl_dep = dependency('wayland-egl', required: false)
+
+gl_deps     = []
+gl_cpp_args = []
+if egl_dep.found() and wayland_egl_dep.found()
+  gl_deps     = [egl_dep, wayland_egl_dep]
+  gl_cpp_args = ['-DHAVE_EGL=1']
+endif
 
 wayland_scanner = find_program('wayland-scanner')
 
@@ -68,8 +78,8 @@ gui_lib = static_library(
     xkbcommon_dep,
     libpng_dep,
     libjpeg_dep,
-  ],
-  cpp_args : ['-Wno-old-style-cast'],
+  ] + gl_deps,
+  cpp_args : ['-Wno-old-style-cast'] + gl_cpp_args,
 )
 
 gui_dep = declare_dependency(
@@ -86,5 +96,5 @@ gui_dep = declare_dependency(
     xkbcommon_dep,
     libpng_dep,
     libjpeg_dep,
-  ],
+  ] + gl_deps,
 )

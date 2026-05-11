@@ -21,7 +21,7 @@ void print_version() {
 }
 
 void print_usage() {
-    std::fputs("usage: transporter [--version|-V] [--no-gui|-N] "
+    std::fputs("usage: transporter [--version|-V] [--no-gui|-N] [--cpu] "
                "[--device hw:CARD=...,DEV=N] [<file>]\n",
                stderr);
 }
@@ -29,6 +29,7 @@ void print_usage() {
 struct ParsedArgs {
     bool version = false;
     bool no_gui = false;
+    bool cpu_render = false;
     bool help = false;
     std::string device;
     std::string file;
@@ -45,6 +46,8 @@ ParsedArgs parse_args(int argc, char** argv) {
             out.version = true;
         } else if (a == "--no-gui" || a == "-N") {
             out.no_gui = true;
+        } else if (a == "--cpu") {
+            out.cpu_render = true;
         } else if (a == "--help" || a == "-h") {
             out.help = true;
         } else if (a == "--device") {
@@ -99,7 +102,8 @@ int main(int argc, char** argv) {
     }
 
     transporter::gui::AppArgs ga;
-    ga.config_path = transporter::config::default_config_path();
+    ga.config_path  = transporter::config::default_config_path();
+    ga.prefer_cpu   = args.cpu_render;
     if (!args.file.empty()) {
         ga.file_to_play = std::filesystem::path{args.file};
     }

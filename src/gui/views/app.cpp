@@ -1012,7 +1012,9 @@ int run(const AppArgs& args) {
         }
     }
 
-    auto win_or = platform::Window::create(platform::WindowConfig{});
+    platform::WindowConfig wcfg;
+    wcfg.prefer_cpu = args.prefer_cpu;
+    auto win_or = platform::Window::create(wcfg);
     if (!win_or) {
         std::fprintf(stderr, "transporter: %s\n",
                      platform::init_error_message(win_or.error()));

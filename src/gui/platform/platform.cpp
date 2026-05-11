@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Window lifecycle: Wayland → xdg-shell → wl_shm → ImGui (software render).
+// Window lifecycle: Wayland → xdg-shell → EGL/OpenGL (GPU) or wl_shm (CPU).
 
 #include "platform.hpp"
 #include "platform_internal.hpp"
 
 #include <imgui.h>
+#include <imgui_impl_opengl3.h>
 
 #include <poll.h>
 
@@ -33,8 +34,12 @@ Window::Window() : impl_(std::make_unique<WindowImpl>()) {}
 Window::~Window() {
     if (!impl_) return;
     if (ImGui::GetCurrentContext()) {
+        if (impl_->gl_initialized) {
+            ImGui_ImplOpenGL3_Shutdown();
+        }
         ImGui::DestroyContext();
     }
+    destroy_egl(*impl_);
     destroy_shm(*impl_);
     destroy_input(*impl_);
     destroy_surface(*impl_);
@@ -82,6 +87,14 @@ Window::create(const WindowConfig& cfg) {
         return std::unexpected(InitError::EglInitFailed);
     }
 
+    // Attempt GPU path unless caller requested CPU.
+    s.render_mode = RenderMode::CPU;
+    if (!cfg.prefer_cpu) {
+        if (init_egl(s)) {
+            s.render_mode = RenderMode::GPU;
+        }
+    }
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
@@ -107,11 +120,26 @@ Window::create(const WindowConfig& cfg) {
         io.Fonts->AddFontDefault(&fcfg);
     }
 
-    // Build font atlas into CPU memory; set a dummy texture ID (no GPU upload).
-    if (!io.Fonts->Build()) {
-        return std::unexpected(InitError::GlLoadFailed);
+    if (s.render_mode == RenderMode::GPU) {
+        // ImGui_ImplOpenGL3_Init uploads the font atlas to a GL texture
+        // and sets its own TexID — no manual SetTexID needed.
+        if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
+            // GL init failed; fall back to CPU path.
+            ImGui_ImplOpenGL3_Shutdown();
+            destroy_egl(s);
+            s.render_mode = RenderMode::CPU;
+        } else {
+            s.gl_initialized = true;
+        }
     }
-    io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+
+    if (s.render_mode == RenderMode::CPU) {
+        // Build font atlas into CPU memory; set a sentinel texture ID.
+        if (!io.Fonts->Build()) {
+            return std::unexpected(InitError::GlLoadFailed);
+        }
+        io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+    }
 
     io.DisplaySize = ImVec2(static_cast<float>(s.width),
                             static_cast<float>(s.height));
@@ -144,7 +172,11 @@ bool Window::poll() {
 
 void Window::begin_frame() {
     if (impl_->needs_resize) {
-        shm_resize(*impl_);
+        if (impl_->render_mode == RenderMode::GPU) {
+            egl_resize(*impl_);
+        } else {
+            shm_resize(*impl_);
+        }
         impl_->needs_resize = false;
     }
     ImGuiIO& io = ImGui::GetIO();
@@ -155,13 +187,23 @@ void Window::begin_frame() {
     impl_->last_frame_time = now;
     io.DeltaTime = dt.count() > 0.0f ? dt.count() : (1.0f / 60.0f);
     input_pump_imgui(*impl_);
+    if (impl_->render_mode == RenderMode::GPU) {
+        ImGui_ImplOpenGL3_NewFrame();
+    }
     ImGui::NewFrame();
 }
 
 bool Window::end_frame(float r, float g, float b) {
-    ImGui::Render();
-    render_frame(*impl_, r, g, b);
-    shm_commit(*impl_);
+    if (impl_->render_mode == RenderMode::GPU) {
+        // GL clear + ImGui render + EGL swap are done in egl.cpp to keep
+        // platform.cpp free of GL symbols (resolved via dlsym at runtime).
+        ImGui::Render();
+        egl_render_frame(*impl_, r, g, b);
+    } else {
+        ImGui::Render();
+        render_frame(*impl_, r, g, b);
+        shm_commit(*impl_);
+    }
     return true;
 }
 
@@ -182,6 +224,7 @@ void Window::resize(int w, int h) {
     impl_->width  = w;
     impl_->height = h;
     impl_->needs_resize = true;
+    // egl_resize / shm_resize deferred to begin_frame to avoid mid-frame state
 }
 
 void Window::set_title(const std::string& title) {

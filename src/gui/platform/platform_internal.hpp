@@ -17,6 +17,8 @@
 
 namespace transporter::gui::platform {
 
+enum class RenderMode { CPU, GPU };
+
 struct ShmBuffer {
     wl_buffer* buf  = nullptr;
     uint8_t*   data = nullptr;  // mmap'd pixel data (XRGB8888)
@@ -35,12 +37,12 @@ struct WindowImpl {
     wl_output*     output     = nullptr;
     wl_shm*        shm        = nullptr;
 
-    // Surface stack (no EGL window)
+    // Surface stack
     wl_surface*   surface  = nullptr;
     xdg_surface*  xdg_surf = nullptr;
     xdg_toplevel* toplevel = nullptr;
 
-    // Shared-memory pixel buffers (double-buffered)
+    // Shared-memory pixel buffers (double-buffered; always allocated as fallback)
     ShmBuffer shm_bufs[2];
     int       shm_back   = 0;    // index of the buffer we render into
     int       shm_stride = 0;    // bytes per row = width * 4
@@ -90,6 +92,15 @@ struct WindowImpl {
     const uint8_t* font_pixels   = nullptr;
     int            font_atlas_w  = 0;
     int            font_atlas_h  = 0;
+
+    RenderMode render_mode = RenderMode::GPU;
+
+    // EGL/GL fields (used only when render_mode == GPU)
+    void* egl_display    = nullptr;  // EGLDisplay
+    void* egl_surface    = nullptr;  // EGLSurface
+    void* egl_context    = nullptr;  // EGLContext
+    void* egl_window     = nullptr;  // wl_egl_window*
+    bool  gl_initialized = false;
 };
 
 // wayland.cpp
@@ -114,6 +125,14 @@ void render_frame(WindowImpl& w, float r, float g, float b);
 void register_seat(WindowImpl& w);
 void destroy_input(WindowImpl& w);
 void input_pump_imgui(WindowImpl& w);
+
+// egl.cpp
+bool init_egl(WindowImpl& w);
+void destroy_egl(WindowImpl& w);
+void egl_swap(WindowImpl& w);
+void egl_resize(WindowImpl& w);
+// GL viewport/clear + ImGui draw + swap. Called from end_frame on GPU path.
+void egl_render_frame(WindowImpl& w, float r, float g, float b);
 
 } // namespace transporter::gui::platform
 

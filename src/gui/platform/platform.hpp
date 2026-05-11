@@ -38,6 +38,7 @@ struct WindowConfig {
     std::string title = "transporter";
     int default_width = 960;
     int default_height = 600;
+    bool prefer_cpu = false;  // force wl_shm path; skip EGL init
 };
 
 // Aggregated reason why init failed. The main process turns this into a
