@@ -633,9 +633,15 @@ struct Engine::Impl {
         // Seek the decoder. Ignore error — worst case it stays at current pos.
         (void)decoder->seek_frame(frame);
 
-        // Also update frames_written to reflect new position so the GUI
-        // progress bar matches.
-        frames_written.store(frame, std::memory_order_relaxed);
+        // Update frames_written to reflect the new position. After a gapless
+        // swap frames_written_at_track_start is non-zero, so store the global
+        // equivalent rather than the bare intra-track frame offset.
+        const std::uint64_t base =
+            frames_written_at_track_start.load(std::memory_order_relaxed);
+        frames_written.store(base + frame, std::memory_order_relaxed);
+        // Reset decoded counter so telemetry reflects decoded frames from the
+        // new seek position rather than accumulating from before the seek.
+        frames_decoded.store(0, std::memory_order_relaxed);
 
         // Restart decoder thread.
         decoder_run.store(true, std::memory_order_release);
