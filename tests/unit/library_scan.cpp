@@ -231,7 +231,30 @@ int main(int argc, char** argv) {
                     std::to_string(post ? post->size() : 0u));
     }
 
-    std::printf("ok library_scan: added=7 updated=1 removed=1 final=%zu\n",
-                post->size());
+    // Add a second root via set_roots; verify new file is picked up.
+    const fs::path extra_dir = work_root.parent_path() / "extra_root";
+    fs::create_directories(extra_dir, ec);
+    const fs::path src_extra = work_root / "Cmaj7" / "First Light" / "01-overture.flac";
+    const fs::path dst_extra = extra_dir / "bonus.flac";
+    fs::copy_file(src_extra, dst_extra, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        return fail("copy extra file", ec.message());
+    }
+    counters.added.store(0);
+    counters.scan_finished.store(0);
+    lib.set_roots({work_root, extra_dir});
+    lib.rescan_async();
+    if (!wait_until([&] { return counters.scan_finished.load() >= 1; },
+                    std::chrono::seconds{30})) {
+        return fail("fourth scan timeout");
+    }
+    auto with_extra = lib.search(SearchFilter{});
+    if (!with_extra || with_extra->size() != 7) {
+        return fail("post-set_roots size (expected 7)",
+                    std::to_string(with_extra ? with_extra->size() : 0u));
+    }
+
+    std::printf("ok library_scan: added=7 updated=1 removed=1 set_roots=%zu\n",
+                with_extra->size());
     return 0;
 }
