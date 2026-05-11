@@ -218,6 +218,9 @@ void AppState::queue_append(std::filesystem::path p) {
         queue.emplace_back(std::move(p));
     }
     recompute_queue_duration();
+    // If appending just created a new "next" slot for the current track,
+    // issue a preload so gapless can stage it.
+    refresh_preload();
 }
 
 void AppState::queue_insert_next(std::filesystem::path p) {
