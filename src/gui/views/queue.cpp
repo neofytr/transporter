@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include <chrono>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -16,20 +17,44 @@ namespace {
 constexpr ImVec4 kMuted{0.65f, 0.65f, 0.70f, 1.0f};
 constexpr ImVec4 kAccent{0.30f, 0.60f, 0.90f, 0.60f};
 
+// Formats milliseconds as H:MM:SS or M:SS.
+std::string format_duration(std::chrono::milliseconds ms) {
+    const auto total_s = static_cast<long long>(ms.count() / 1000);
+    const long long h = total_s / 3600;
+    const long long m = (total_s % 3600) / 60;
+    const long long s = total_s % 60;
+    char buf[32];
+    if (h > 0) {
+        std::snprintf(buf, sizeof(buf), "%lld:%02lld:%02lld", h, m, s);
+    } else {
+        std::snprintf(buf, sizeof(buf), "%lld:%02lld", m, s);
+    }
+    return buf;
+}
+
 } // namespace
 
 void draw_queue_view(AppState& st) {
     std::vector<std::filesystem::path> snap_queue;
     std::int32_t snap_index = -1;
+    std::chrono::milliseconds snap_duration{0};
     {
         std::lock_guard<std::mutex> lk(st.queue_mtx);
         snap_queue = st.queue;
         snap_index = st.queue_index;
+        snap_duration = st.queue_total_duration;
     }
 
-    // Header: count + clear button on same line
-    ImGui::Text("%zu track%s", snap_queue.size(),
-                snap_queue.size() == 1 ? "" : "s");
+    // Header: count, total duration (if known), clear button
+    if (snap_duration.count() > 0) {
+        ImGui::Text("%zu track%s  \xc2\xb7  %s",
+                    snap_queue.size(),
+                    snap_queue.size() == 1 ? "" : "s",
+                    format_duration(snap_duration).c_str());
+    } else {
+        ImGui::Text("%zu track%s", snap_queue.size(),
+                    snap_queue.size() == 1 ? "" : "s");
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("Clear")) {
         st.queue_clear();

@@ -36,6 +36,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -179,10 +180,13 @@ std::optional<std::filesystem::path> AppState::queue_previous() {
 }
 
 void AppState::queue_set_single(std::filesystem::path p) {
-    std::lock_guard lk(queue_mtx);
-    queue.clear();
-    queue.emplace_back(std::move(p));
-    queue_index = 0;
+    {
+        std::lock_guard lk(queue_mtx);
+        queue.clear();
+        queue.emplace_back(std::move(p));
+        queue_index = 0;
+    }
+    recompute_queue_duration();
 }
 
 std::optional<std::filesystem::path> AppState::queue_peek_next() const {
@@ -198,8 +202,11 @@ std::optional<std::filesystem::path> AppState::queue_peek_next() const {
 }
 
 void AppState::queue_append(std::filesystem::path p) {
-    std::lock_guard lk(queue_mtx);
-    queue.emplace_back(std::move(p));
+    {
+        std::lock_guard lk(queue_mtx);
+        queue.emplace_back(std::move(p));
+    }
+    recompute_queue_duration();
 }
 
 bool AppState::queue_jump_to(std::int32_t idx) {
@@ -223,29 +230,69 @@ bool AppState::queue_jump_to(std::int32_t idx) {
 }
 
 void AppState::queue_remove(std::int32_t idx) {
-    std::lock_guard lk(queue_mtx);
-    if (idx < 0 || idx >= static_cast<std::int32_t>(queue.size())) {
-        return;
-    }
-    queue.erase(queue.begin() + idx);
-    if (queue.empty()) {
-        queue_index = -1;
-    } else if (idx <= queue_index) {
-        --queue_index;
-        if (queue_index < 0) {
-            queue_index = 0;
+    {
+        std::lock_guard lk(queue_mtx);
+        if (idx < 0 || idx >= static_cast<std::int32_t>(queue.size())) {
+            return;
+        }
+        queue.erase(queue.begin() + idx);
+        if (queue.empty()) {
+            queue_index = -1;
+        } else if (idx <= queue_index) {
+            --queue_index;
+            if (queue_index < 0) {
+                queue_index = 0;
+            }
         }
     }
+    recompute_queue_duration();
 }
 
 void AppState::queue_clear() {
     std::lock_guard lk(queue_mtx);
     queue.clear();
     queue_index = -1;
+    queue_total_duration = std::chrono::milliseconds{0};
 }
 
 void AppState::queue_shuffle_toggle() {
     shuffle = !shuffle;
+}
+
+void AppState::recompute_queue_duration() {
+    if (library_ == nullptr) {
+        return;
+    }
+    std::vector<std::filesystem::path> snap;
+    {
+        std::lock_guard lk(queue_mtx);
+        snap = queue;
+    }
+    if (snap.empty()) {
+        std::lock_guard lk(queue_mtx);
+        queue_total_duration = std::chrono::milliseconds{0};
+        return;
+    }
+    auto result = library_->search(library::SearchFilter{});
+    if (!result) {
+        return;
+    }
+    std::unordered_map<std::string, std::chrono::milliseconds> dur_map;
+    dur_map.reserve(result->size());
+    for (const auto& t : *result) {
+        dur_map.emplace(t.path.string(), t.duration);
+    }
+    std::chrono::milliseconds total{0};
+    for (const auto& p : snap) {
+        auto it = dur_map.find(p.string());
+        if (it != dur_map.end()) {
+            total += it->second;
+        }
+    }
+    {
+        std::lock_guard lk(queue_mtx);
+        queue_total_duration = total;
+    }
 }
 
 namespace {

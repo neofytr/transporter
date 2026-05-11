@@ -64,6 +64,7 @@ struct AppState {
     std::mutex queue_mtx;
     std::vector<std::filesystem::path> queue;
     std::int32_t queue_index = -1;
+    std::chrono::milliseconds queue_total_duration{0};
     bool shuffle = false;
     enum class RepeatMode : std::uint8_t { None, One, All };
     RepeatMode repeat_mode = RepeatMode::None;
@@ -111,6 +112,10 @@ struct AppState {
     void queue_remove(std::int32_t idx);
     void queue_clear();
     void queue_shuffle_toggle();
+
+    // Recomputes queue_total_duration from library metadata.
+    // Safe to call from any thread. No-op if library_ is null.
+    void recompute_queue_duration();
 };
 
 // Each draw_* fn renders a single ImGui window's contents within the current
