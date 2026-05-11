@@ -272,6 +272,21 @@ void AppState::queue_remove(std::int32_t idx) {
     recompute_queue_duration();
 }
 
+void AppState::queue_move(std::int32_t from_idx, std::int32_t to_idx) {
+    std::lock_guard lk(queue_mtx);
+    const auto n = static_cast<std::int32_t>(queue.size());
+    if (from_idx < 0 || from_idx >= n || to_idx < 0 || to_idx >= n) {
+        return;
+    }
+    std::swap(queue[static_cast<std::size_t>(from_idx)],
+              queue[static_cast<std::size_t>(to_idx)]);
+    if (queue_index == from_idx) {
+        queue_index = to_idx;
+    } else if (queue_index == to_idx) {
+        queue_index = from_idx;
+    }
+}
+
 void AppState::queue_clear() {
     std::lock_guard lk(queue_mtx);
     queue.clear();

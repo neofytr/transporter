@@ -94,6 +94,23 @@ void draw_queue_view(AppState& st) {
             st.queue_jump_to(i);
         }
 
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Play now")) {
+                if (st.queue_jump_to(i) && st.engine_) {
+                    (void)st.engine_->load(path);
+                    (void)st.engine_->play();
+                }
+            }
+            ImGui::Separator();
+            const bool can_up   = (i > 0);
+            const bool can_down = (i < static_cast<std::int32_t>(snap_queue.size()) - 1);
+            if (ImGui::MenuItem("Move up",   nullptr, false, can_up))   { st.queue_move(i, i - 1); }
+            if (ImGui::MenuItem("Move down", nullptr, false, can_down)) { st.queue_move(i, i + 1); }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Remove")) { st.queue_remove(i); }
+            ImGui::EndPopup();
+        }
+
         if (current) {
             ImGui::PopStyleColor();
             ImGui::SetScrollHereY(0.5f);
