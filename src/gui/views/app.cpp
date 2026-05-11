@@ -561,9 +561,11 @@ void wire_engine_events(AppState& st) {
                 std::lock_guard lk(st.queue_mtx);
                 st.pending_preload_path.clear();
             }
-            if (auto next = st.queue_next(); next) {
-                if (st.engine_->load(*next)) {
-                    (void)st.engine_->play();
+            if (st.engine_ != nullptr) {
+                if (auto next = st.queue_next(); next) {
+                    if (st.engine_->load(*next)) {
+                        (void)st.engine_->play();
+                    }
                 }
             }
             break;
@@ -1108,6 +1110,11 @@ int run(const AppArgs& args) {
                 st.dbus_.reset();
             }
             if (st.engine_) {
+                // Clear callback before reset; unique_ptr::reset() nulls the
+                // pointer first, then calls ~Engine(), which joins threads.
+                // Threads may emit events — without clearing, TrackEnded would
+                // dereference the already-null st.engine_.
+                st.engine_->set_event_callback({});
                 st.engine_->stop();
                 st.engine_.reset();
             }
