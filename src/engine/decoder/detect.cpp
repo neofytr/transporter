@@ -246,15 +246,11 @@ open_decoder(const std::filesystem::path& path) {
     }
 
     if (hint != Format::Unknown && hint != confirmed) {
-        // Allow .ogg → vorbis or opus (both are Ogg-container variants);
-        // anything else mismatched is refused.
-        const bool ogg_ok = (hint == Format::Unknown) ||
-                            (confirmed == Format::Vorbis || confirmed == Format::Opus);
-        // Treat .opus + Vorbis as a hard mismatch; .ogg+Opus as fine.
-        std::string ext = lowercase(path.extension().string());
+        // .ogg / .oga / .ogv may contain either Vorbis or Opus — allow that
+        // mismatch. Any other extension/magic disagreement is refused.
+        const std::string ext = lowercase(path.extension().string());
         const bool ext_is_ogg = ext == ".ogg" || ext == ".oga" || ext == ".ogv";
-        if (!ext_is_ogg && hint != confirmed) {
-            (void)ogg_ok;
+        if (!ext_is_ogg) {
             std::string msg = "extension/magic mismatch: ";
             msg += format_name(hint);
             msg += " vs ";
