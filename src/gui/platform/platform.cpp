@@ -11,7 +11,9 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 namespace transporter::gui::platform {
 
@@ -46,6 +48,23 @@ Window::create(const WindowConfig& cfg) {
     s.title  = cfg.title;
     s.width  = cfg.default_width;
     s.height = cfg.default_height;
+
+    // Restore saved geometry
+    {
+        const char* home = std::getenv("HOME");
+        if (home) {
+            const std::filesystem::path gf =
+                std::filesystem::path{home} / ".cache" / "transporter" / "geometry";
+            if (std::ifstream f{gf}; f) {
+                int gw = 0, gh = 0;
+                f >> gw >> gh;
+                if (gw >= 320 && gw <= 3840 && gh >= 72 && gh <= 2160) {
+                    s.width  = gw;
+                    s.height = gh;
+                }
+            }
+        }
+    }
 
     if (!init_wayland(s)) {
         return std::unexpected(s.display ? InitError::MissingProtocol

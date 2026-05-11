@@ -27,10 +27,19 @@ namespace transporter::gui {
 
 static void format_time(std::int64_t ms, char* out, std::size_t n) {
     if (ms < 0) ms = 0;
-    const std::int64_t s = ms / 1000;
-    std::snprintf(out, n, "%lld:%02lld",
-                  static_cast<long long>(s / 60),
-                  static_cast<long long>(s % 60));
+    const std::int64_t s  = ms / 1000;
+    const std::int64_t m  = s / 60;
+    const std::int64_t h  = m / 60;
+    if (h > 0) {
+        std::snprintf(out, n, "%lld:%02lld:%02lld",
+                      static_cast<long long>(h),
+                      static_cast<long long>(m % 60),
+                      static_cast<long long>(s % 60));
+    } else {
+        std::snprintf(out, n, "%lld:%02lld",
+                      static_cast<long long>(m),
+                      static_cast<long long>(s % 60));
+    }
 }
 
 namespace {
@@ -261,6 +270,17 @@ void draw_main_view(AppState& st) {
         ImGui::TextColored(kMuted, "%s", snap.source.tags.album.c_str());
     }
 
+    // Queue position
+    {
+        std::lock_guard lk(st.queue_mtx);
+        if (st.queue.size() > 1 && st.queue_index >= 0) {
+            ImGui::SameLine();
+            ImGui::TextColored(kMuted, "[%d / %d]",
+                               st.queue_index + 1,
+                               static_cast<int>(st.queue.size()));
+        }
+    }
+
     // Time / progress
     const std::int64_t total_ms = snap.source.duration.count();
     std::int64_t elapsed_ms = 0;
@@ -270,7 +290,7 @@ void draw_main_view(AppState& st) {
         elapsed_ms = static_cast<std::int64_t>(
             (track_frames * 1000ull) / snap.source.sample_rate_hz);
     }
-    char tbuf[16], dbuf[16];
+    char tbuf[24], dbuf[24];
     format_time(elapsed_ms, tbuf, sizeof(tbuf));
     format_time(total_ms, dbuf, sizeof(dbuf));
     ImGui::Text("%s / %s", tbuf, dbuf);
@@ -486,7 +506,7 @@ void draw_mini_view(AppState& st) {
                             static_cast<std::int64_t>(snap.output.frames_written_at_track_start);
     const std::int64_t elapsed_ms = snap.source.sample_rate_hz > 0
         ? (fw * 1000LL) / snap.source.sample_rate_hz : 0;
-    char tbuf[16], dbuf[16];
+    char tbuf[24], dbuf[24];
     format_time(elapsed_ms < 0 ? 0 : elapsed_ms, tbuf, sizeof(tbuf));
     format_time(total_ms, dbuf, sizeof(dbuf));
     ImGui::TextColored(kMuted, "%s/%s", tbuf, dbuf);

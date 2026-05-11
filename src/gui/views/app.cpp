@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -678,6 +679,23 @@ int run(const AppArgs& args) {
         ImGui::End();
 
         win.end_frame(0.07f, 0.08f, 0.10f);
+    }
+
+    // Save window geometry for next launch
+    {
+        const char* home = std::getenv("HOME");
+        if (home) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path dir = fs::path{home} / ".cache" / "transporter";
+            fs::create_directories(dir, ec);
+            if (!ec) {
+                if (std::ofstream f{dir / "geometry"}; f) {
+                    f << win.framebuffer_width() << ' '
+                      << win.framebuffer_height() << '\n';
+                }
+            }
+        }
     }
 
     backend_thread.join();
