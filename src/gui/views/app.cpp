@@ -254,6 +254,9 @@ bool AppState::queue_jump_to(std::int32_t idx) {
         }
         queue_index = idx;
         target = queue[static_cast<std::size_t>(idx)];
+        // Clear before load so TrackLoaded doesn't spuriously advance queue_index
+        // when target happens to equal the previously-preloaded path.
+        pending_preload_path.clear();
     }
     if (!engine_->load(target)) {
         return false;
@@ -678,9 +681,11 @@ void open_dbus_service(AppState& st) {
     }
     dbus_svc::Hooks hooks;
     hooks.next = [&st]() -> std::optional<std::filesystem::path> {
+        { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
         return st.queue_next();
     };
     hooks.previous = [&st]() -> std::optional<std::filesystem::path> {
+        { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
         return st.queue_previous();
     };
     hooks.reload_config = [&st]() -> bool {
@@ -806,6 +811,7 @@ void handle_view_shortcuts(AppState& st) {
 
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
         if (io.KeyCtrl) {
+            { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto n = st.queue_next()) {
                 (void)st.engine_->load(*n);
                 (void)st.engine_->play();
@@ -831,6 +837,7 @@ void handle_view_shortcuts(AppState& st) {
 
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
         if (io.KeyCtrl) {
+            { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto p = st.queue_previous()) {
                 (void)st.engine_->load(*p);
                 (void)st.engine_->play();
@@ -1101,6 +1108,7 @@ int run(const AppArgs& args) {
             if (win.take_media_stop() && st.engine_)
                 (void)st.engine_->stop();
             if (win.take_media_next() && st.engine_) {
+                { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
                 if (auto n = st.queue_next(); n) {
                     (void)st.engine_->load(*n);
                     (void)st.engine_->play();
@@ -1108,6 +1116,7 @@ int run(const AppArgs& args) {
                 }
             }
             if (win.take_media_prev() && st.engine_) {
+                { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
                 if (auto p = st.queue_previous(); p) {
                     (void)st.engine_->load(*p);
                     (void)st.engine_->play();

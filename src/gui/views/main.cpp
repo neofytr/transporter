@@ -527,6 +527,7 @@ void draw_main_view(AppState& st) {
     ImGui::SameLine();
     if (ImGui::Button("Prev")) {
         if (st.engine_ != nullptr) {
+            { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto prev = st.queue_previous(); prev) {
                 (void)st.engine_->load(*prev);
                 (void)st.engine_->play();
@@ -537,6 +538,7 @@ void draw_main_view(AppState& st) {
     ImGui::SameLine();
     if (ImGui::Button("Next")) {
         if (st.engine_ != nullptr) {
+            { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto next = st.queue_next(); next) {
                 (void)st.engine_->load(*next);
                 (void)st.engine_->play();
@@ -690,6 +692,7 @@ void draw_mini_view(AppState& st) {
         if (ImGui::SmallButton("\xe2\x8f\xb9")) { (void)st.engine_->stop(); }
         ImGui::SameLine();
         if (ImGui::SmallButton("\xe2\x8f\xae")) {
+            { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto p = st.queue_previous(); p) {
                 (void)st.engine_->load(*p);
                 (void)st.engine_->play();
@@ -698,6 +701,7 @@ void draw_mini_view(AppState& st) {
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("\xe2\x8f\xad")) {
+            { std::lock_guard lk(st.queue_mtx); st.pending_preload_path.clear(); }
             if (auto n = st.queue_next(); n) {
                 (void)st.engine_->load(*n);
                 (void)st.engine_->play();
