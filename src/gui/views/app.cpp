@@ -1249,15 +1249,23 @@ int run_headless(const AppArgs& args) {
     int exit_code = 0;
     st.engine_->set_event_callback([&](const engine::Event& ev) {
         switch (ev.kind) {
-        case engine::Event::Kind::TrackLoaded:
+        case engine::Event::Kind::TrackLoaded: {
             std::printf("playing: %s\n", ev.file_path.c_str());
-            std::printf("loaded rate=%u ch=%u total=%llu\n",
+            const auto snap = st.engine_->pipeline_snapshot();
+            if (!snap.source.tags.title.empty())
+                std::printf("title:   %s\n", snap.source.tags.title.c_str());
+            if (!snap.source.tags.artist.empty())
+                std::printf("artist:  %s\n", snap.source.tags.artist.c_str());
+            if (!snap.source.tags.album.empty())
+                std::printf("album:   %s\n", snap.source.tags.album.c_str());
+            std::printf("format:  %u Hz  %u ch  %s\n",
                         ev.format.sample_rate_hz, ev.format.channels,
-                        static_cast<unsigned long long>(ev.total_frames));
+                        snap.source.codec_name.c_str());
             if (st.dbus_ != nullptr) {
                 st.dbus_->notify_track_loaded();
             }
             break;
+        }
         case engine::Event::Kind::TrackEnded:
             std::printf("ended\n");
             if (use_playlist) {
