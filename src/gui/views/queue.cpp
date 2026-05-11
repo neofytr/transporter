@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -39,13 +40,13 @@ void draw_queue_view(AppState& st) {
     std::vector<std::filesystem::path> snap_queue;
     std::int32_t snap_index = -1;
     std::chrono::milliseconds snap_duration{0};
-    std::unordered_map<std::string, std::string> display_names;
+    std::unordered_map<std::string, AppState::QueueRowInfo> row_info;
     {
         std::lock_guard<std::mutex> lk(st.queue_mtx);
         snap_queue = st.queue;
         snap_index = st.queue_index;
         snap_duration = st.queue_total_duration;
-        display_names = st.queue_display_names;
+        row_info = st.queue_row_info;
     }
 
     // Header: count, total duration (if known), clear button
@@ -83,10 +84,12 @@ void draw_queue_view(AppState& st) {
         }
 
         const auto& path = snap_queue[static_cast<std::size_t>(i)];
-        const auto name_it = display_names.find(path.string());
-        const std::string& display = (name_it != display_names.end())
-            ? name_it->second
+        const auto ri_it = row_info.find(path.string());
+        const std::string& display = (ri_it != row_info.end() && !ri_it->second.label.empty())
+            ? ri_it->second.label
             : path.stem().string();
+        const std::chrono::milliseconds row_dur =
+            (ri_it != row_info.end()) ? ri_it->second.duration : std::chrono::milliseconds{0};
         char label[512];
         std::snprintf(label, sizeof(label), "%d  %s", i + 1, display.c_str());
 
@@ -116,9 +119,21 @@ void draw_queue_view(AppState& st) {
             ImGui::SetScrollHereY(0.5f);
         }
 
-        // Right-aligned remove button
+        // Right-aligned: duration + remove button
         ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 24.0f);
+        constexpr float kRemoveW = 24.0f;
+        if (row_dur.count() > 0) {
+            const long long total_s = row_dur.count() / 1000;
+            char dur[20];
+            std::snprintf(dur, sizeof(dur), "%lld:%02lld",
+                          static_cast<long long>(total_s / 60),
+                          static_cast<long long>(total_s % 60));
+            const float dur_w = ImGui::CalcTextSize(dur).x + 8.0f;
+            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - kRemoveW - dur_w);
+            ImGui::TextColored(kMuted, "%s", dur);
+            ImGui::SameLine();
+        }
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - kRemoveW);
         if (ImGui::SmallButton("\xe2\x9c\x95")) {
             st.queue_remove(i);
         }

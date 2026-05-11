@@ -316,32 +316,31 @@ void AppState::recompute_queue_duration() {
     if (!result) {
         return;
     }
-    std::unordered_map<std::string, std::chrono::milliseconds> dur_map;
-    std::unordered_map<std::string, std::string> name_map;
-    dur_map.reserve(result->size());
-    name_map.reserve(result->size());
+    std::unordered_map<std::string, QueueRowInfo> row_info;
+    row_info.reserve(result->size());
     for (const auto& t : *result) {
-        dur_map.emplace(t.path.string(), t.duration);
+        QueueRowInfo ri;
+        ri.duration = t.duration;
         if (!t.title.empty()) {
-            std::string label = t.title;
+            ri.label = t.title;
             if (!t.artist.empty()) {
-                label += "  \xe2\x80\x94  ";
-                label += t.artist;
+                ri.label += "  \xe2\x80\x94  ";
+                ri.label += t.artist;
             }
-            name_map.emplace(t.path.string(), std::move(label));
         }
+        row_info.emplace(t.path.string(), std::move(ri));
     }
     std::chrono::milliseconds total{0};
     for (const auto& p : snap) {
-        auto it = dur_map.find(p.string());
-        if (it != dur_map.end()) {
-            total += it->second;
+        auto it = row_info.find(p.string());
+        if (it != row_info.end()) {
+            total += it->second.duration;
         }
     }
     {
         std::lock_guard lk(queue_mtx);
         queue_total_duration = total;
-        queue_display_names = std::move(name_map);
+        queue_row_info = std::move(row_info);
     }
 }
 
