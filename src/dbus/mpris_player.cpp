@@ -11,8 +11,8 @@
 //   Next       - implemented (delegates to caller-supplied hook)
 //   Previous   - implemented (delegates to caller-supplied hook)
 //   OpenUri    - implemented (file:// URIs only)
-//   Seek       - returns NotSupported; engine has no Seek API in Phase 10
-//   SetPosition - returns NotSupported (same reason)
+//   Seek       - implemented, engine::seek() takes absolute frame offset
+//   SetPosition - implemented
 //
 // Properties:
 //   PlaybackStatus, Metadata, Position, Volume, Rate, MinimumRate,
@@ -228,19 +228,39 @@ void MprisPlayer::register_vtable() {
         sdbus::registerMethod("Play").implementedAs(post_play),
         sdbus::registerMethod("Seek")
             .withInputParamNames("Offset")
-            .implementedAs([](std::int64_t /*offset_us*/) {
-                throw sdbus::Error(
-                    sdbus::Error::Name{"org.mpris.MediaPlayer2.Player.Error.NotSupported"},
-                    "Seek is not implemented in this version");
+            .implementedAs([this](std::int64_t offset_us) {
+                if (engine_ == nullptr) {
+                    return;
+                }
+                const auto snap = engine_->pipeline_snapshot();
+                const std::uint32_t rate = snap.source.sample_rate_hz;
+                if (rate == 0) {
+                    return;
+                }
+                const std::int64_t cur_frame =
+                    static_cast<std::int64_t>(snap.output.frames_written) -
+                    static_cast<std::int64_t>(snap.output.frames_written_at_track_start);
+                const std::int64_t delta_frames =
+                    (offset_us * static_cast<std::int64_t>(rate)) / 1'000'000LL;
+                const std::int64_t target =
+                    std::max(std::int64_t{0}, cur_frame + delta_frames);
+                (void)engine_->seek(static_cast<std::uint64_t>(target));
             }),
         sdbus::registerMethod("SetPosition")
             .withInputParamNames("TrackId", "Position")
-            .implementedAs(
-                [](const sdbus::ObjectPath& /*tid*/, std::int64_t /*pos*/) {
-                    throw sdbus::Error(
-                        sdbus::Error::Name{"org.mpris.MediaPlayer2.Player.Error.NotSupported"},
-                        "SetPosition is not implemented in this version");
-                }),
+            .implementedAs([this](const sdbus::ObjectPath& /*tid*/, std::int64_t pos_us) {
+                if (engine_ == nullptr) {
+                    return;
+                }
+                const auto snap = engine_->pipeline_snapshot();
+                const std::uint32_t rate = snap.source.sample_rate_hz;
+                if (rate == 0 || pos_us < 0) {
+                    return;
+                }
+                const std::uint64_t frame =
+                    (static_cast<std::uint64_t>(pos_us) * rate) / 1'000'000ULL;
+                (void)engine_->seek(frame);
+            }),
         sdbus::registerMethod("OpenUri")
             .withInputParamNames("Uri")
             .implementedAs([this](const std::string& uri) {
@@ -340,7 +360,13 @@ void MprisPlayer::register_vtable() {
             [this] { return engine_ != nullptr; }),
         sdbus::registerProperty("CanPause").withGetter(
             [this] { return engine_ != nullptr; }),
-        sdbus::registerProperty("CanSeek").withGetter([] { return false; }),
+        sdbus::registerProperty("CanSeek").withGetter([this] {
+            if (engine_ == nullptr) {
+                return false;
+            }
+            const auto snap = engine_->pipeline_snapshot();
+            return snap.source.sample_rate_hz > 0 && snap.source.total_frames > 0;
+        }),
         sdbus::registerProperty("CanControl").withGetter(
             [this] { return engine_ != nullptr; })
     ).forInterface(sdbus::InterfaceName{kIface});
