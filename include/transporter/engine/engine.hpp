@@ -150,7 +150,7 @@ public:
     // (channel-0 only) samples at the native playback rate. GUI thread owns
     // the consumer side; audio thread is the producer. Null when no track
     // is loaded.
-    const SpscByteRing* spectrum_ring() const noexcept;
+    SpscByteRing* spectrum_ring() noexcept;
 
     // Single-listener. Caller-side fan-out is the consumer's job.
     void set_event_callback(EventCallback cb);

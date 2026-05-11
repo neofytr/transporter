@@ -1663,7 +1663,7 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
     return s;
 }
 
-const SpscByteRing* Engine::spectrum_ring() const noexcept {
+SpscByteRing* Engine::spectrum_ring() noexcept {
     return impl_->spec_ring.get();
 }
 

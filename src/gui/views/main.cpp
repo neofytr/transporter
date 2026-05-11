@@ -438,15 +438,14 @@ void draw_main_view(AppState& st) {
 
     // Spectrum analyser
     if (st.engine_ != nullptr) {
-        const auto* sring = st.engine_->spectrum_ring();
+        auto* sring = st.engine_->spectrum_ring();
         if (sring != nullptr) {
-            auto* rw_ring = const_cast<engine::SpscByteRing*>(sring);
             float tmp[512];
-            const std::size_t avail = rw_ring->readable();
+            const std::size_t avail = sring->readable();
             if (avail >= sizeof(float)) {
                 const std::size_t take = std::min(avail, sizeof(tmp));
                 auto sp = std::span<std::byte>(reinterpret_cast<std::byte*>(tmp), take);
-                const std::size_t got = rw_ring->read(sp);
+                const std::size_t got = sring->read(sp);
                 g_spectrum.ingest(tmp, got / sizeof(float));
             }
             g_spectrum.compute(snap.source.sample_rate_hz);
