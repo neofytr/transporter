@@ -27,6 +27,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <random>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -151,10 +152,12 @@ std::optional<std::filesystem::path> AppState::queue_next() {
             if (repeat_mode == RepeatMode::All) return queue[0];
             return std::nullopt;
         }
+        static std::mt19937 rng{std::random_device{}()};
+        std::uniform_int_distribution<std::int32_t> dist{
+            0, static_cast<std::int32_t>(queue.size()) - 1};
         std::int32_t next;
         do {
-            next = static_cast<std::int32_t>(
-                static_cast<std::size_t>(std::rand()) % queue.size());
+            next = dist(rng);
         } while (next == queue_index);
         queue_index = next;
         return queue[static_cast<std::size_t>(queue_index)];
