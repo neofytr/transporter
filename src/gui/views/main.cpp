@@ -404,8 +404,15 @@ void draw_main_view(AppState& st) {
             static_cast<float>(snap.ring.fill_bytes) /
             static_cast<float>(snap.ring.capacity_bytes),
             0.0f, 1.0f);
+        // Green when healthy (>25%), yellow when low, red when nearly empty.
+        ImVec4 ring_col;
+        if (ring_fill > 0.25f)      ring_col = {0.20f, 0.70f, 0.30f, 1.0f};
+        else if (ring_fill > 0.08f) ring_col = {0.80f, 0.65f, 0.10f, 1.0f};
+        else                        ring_col = {0.80f, 0.20f, 0.15f, 1.0f};
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ring_col);
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::ProgressBar(ring_fill, ImVec2(-FLT_MIN, 3.0f), "");
+        ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("ring buffer %.0f%% full  (%zu / %zu bytes)",
                               ring_fill * 100.0f,
