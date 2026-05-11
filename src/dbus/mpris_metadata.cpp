@@ -125,6 +125,10 @@ mpris_metadata_from_parts(const std::string& file_path,
         std::vector<std::string> arr{tags.artist};
         out.emplace("xesam:artist", sdbus::Variant{arr});
     }
+    if (!tags.album_artist.empty()) {
+        std::vector<std::string> arr{tags.album_artist};
+        out.emplace("xesam:albumArtist", sdbus::Variant{arr});
+    }
     if (!tags.album.empty()) {
         out.emplace("xesam:album", sdbus::Variant{tags.album});
     }

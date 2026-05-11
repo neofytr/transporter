@@ -364,7 +364,8 @@ void MprisPlayer::register_vtable() {
             if (rate == 0) {
                 return std::int64_t{0};
             }
-            const auto frames = snap.output.frames_written;
+            const auto frames = snap.output.frames_written
+                              - snap.output.frames_written_at_track_start;
             const auto us = static_cast<std::int64_t>(
                 (frames * 1'000'000ULL) / rate);
             return us;

@@ -30,6 +30,7 @@ namespace {
 int test_full_tags() {
     transporter::engine::Tags tags{
         .artist = "Miles Davis",
+        .album_artist = "Miles Davis",
         .album = "Kind of Blue",
         .title = "So What",
         .track_no = "1/5",
@@ -55,6 +56,7 @@ int test_full_tags() {
     REQUIRE(m.contains("xesam:trackNumber"));
     REQUIRE(m.contains("xesam:url"));
     REQUIRE(m.contains("xesam:contentCreated"));
+    REQUIRE(m.contains("xesam:albumArtist"));
 
     REQUIRE(m.at("mpris:trackid").get<sdbus::ObjectPath>() ==
             sdbus::ObjectPath{trackid});
@@ -66,6 +68,9 @@ int test_full_tags() {
     const auto artists =
         m.at("xesam:artist").get<std::vector<std::string>>();
     REQUIRE(artists.size() == 1 && artists[0] == "Miles Davis");
+    const auto album_artists =
+        m.at("xesam:albumArtist").get<std::vector<std::string>>();
+    REQUIRE(album_artists.size() == 1 && album_artists[0] == "Miles Davis");
     REQUIRE(m.at("xesam:album").get<std::string>() == "Kind of Blue");
     REQUIRE(m.at("xesam:trackNumber").get<std::int32_t>() == 1);
 

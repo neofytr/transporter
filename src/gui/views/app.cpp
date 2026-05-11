@@ -489,6 +489,7 @@ void wire_engine_events(AppState& st) {
                     (void)st.engine_->preload(*peek);
                 }
             }
+            if (st.dbus_) st.dbus_->notify_track_loaded();
             break;
         case engine::Event::Kind::TrackEnded:
             std::snprintf(line, sizeof(line), "%s", event_kind_name(ev.kind));
@@ -758,7 +759,11 @@ void handle_view_shortcuts(AppState& st) {
 
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
         if (io.KeyCtrl) {
-            if (auto n = st.queue_next()) { (void)st.engine_->load(*n); (void)st.engine_->play(); }
+            if (auto n = st.queue_next()) {
+                (void)st.engine_->load(*n);
+                (void)st.engine_->play();
+                if (st.dbus_) st.dbus_->notify_track_loaded();
+            }
         } else {
             const auto snap = st.engine_->pipeline_snapshot();
             if (snap.source.sample_rate_hz > 0) {
@@ -779,7 +784,11 @@ void handle_view_shortcuts(AppState& st) {
 
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
         if (io.KeyCtrl) {
-            if (auto p = st.queue_previous()) { (void)st.engine_->load(*p); (void)st.engine_->play(); }
+            if (auto p = st.queue_previous()) {
+                (void)st.engine_->load(*p);
+                (void)st.engine_->play();
+                if (st.dbus_) st.dbus_->notify_track_loaded();
+            }
         } else {
             const auto snap = st.engine_->pipeline_snapshot();
             if (snap.source.sample_rate_hz > 0) {
@@ -827,6 +836,7 @@ void handle_view_shortcuts(AppState& st) {
             if (!hw.empty()) {
                 engine::toggle_hw_mute(hw);
                 st.hw_volume_last_poll = {};
+                if (st.dbus_) st.dbus_->notify_volume_changed();
             }
         }
     }
@@ -945,6 +955,7 @@ int run(const AppArgs& args) {
     });
 
     bool queued_done = false;
+    bool queue_metadata_refreshed = false;
     bool was_mini = false;
 
     while (win.poll()) {
@@ -1029,6 +1040,11 @@ int run(const AppArgs& args) {
             queued_done = maybe_play_queued_file(st);
         }
 
+        if (ready && !queue_metadata_refreshed) {
+            queue_metadata_refreshed = true;
+            st.recompute_queue_duration();
+        }
+
         if (ready) {
             if (win.take_media_play_pause() && st.engine_) {
                 const auto s = st.last_engine_state.load(std::memory_order_relaxed);
@@ -1041,18 +1057,23 @@ int run(const AppArgs& args) {
                 if (auto n = st.queue_next(); n) {
                     (void)st.engine_->load(*n);
                     (void)st.engine_->play();
+                    if (st.dbus_) st.dbus_->notify_track_loaded();
                 }
             }
             if (win.take_media_prev() && st.engine_) {
                 if (auto p = st.queue_previous(); p) {
                     (void)st.engine_->load(*p);
                     (void)st.engine_->play();
+                    if (st.dbus_) st.dbus_->notify_track_loaded();
                 }
             }
             if (win.take_media_mute()) {
                 const auto& hw = st.engine_
                     ? st.engine_->pipeline_snapshot().device.current_hw_string : std::string{};
-                if (!hw.empty()) engine::toggle_hw_mute(hw);
+                if (!hw.empty()) {
+                    engine::toggle_hw_mute(hw);
+                    if (st.dbus_) st.dbus_->notify_volume_changed();
+                }
             }
             {
                 const bool vol_up   = win.take_media_vol_up();
@@ -1068,6 +1089,7 @@ int run(const AppArgs& args) {
                             engine::set_hw_volume_pct(hw, pct);
                             st.hw_volume_pct = pct;
                             st.hw_volume_last_poll = {};
+                            if (st.dbus_) st.dbus_->notify_volume_changed();
                         }
                     }
                 }
