@@ -927,10 +927,13 @@ void handle_view_shortcuts(AppState& st) {
         }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_R)) {
-        switch (st.repeat_mode) {
-        case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One;  break;
-        case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All;  break;
-        case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+        {
+            std::lock_guard lk(st.queue_mtx);
+            switch (st.repeat_mode) {
+            case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One;  break;
+            case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All;  break;
+            case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+            }
         }
         st.refresh_preload();
         if (st.dbus_) {

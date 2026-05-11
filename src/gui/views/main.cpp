@@ -583,10 +583,13 @@ void draw_main_view(AppState& st) {
     const bool rep_active = (st.repeat_mode != AppState::RepeatMode::None);
     if (rep_active) ImGui::PushStyleColor(ImGuiCol_Button, kPass);
     if (ImGui::SmallButton(rep_label)) {
-        switch (st.repeat_mode) {
-        case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One; break;
-        case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All; break;
-        case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+        {
+            std::lock_guard lk(st.queue_mtx);
+            switch (st.repeat_mode) {
+            case AppState::RepeatMode::None: st.repeat_mode = AppState::RepeatMode::One; break;
+            case AppState::RepeatMode::One:  st.repeat_mode = AppState::RepeatMode::All; break;
+            case AppState::RepeatMode::All:  st.repeat_mode = AppState::RepeatMode::None; break;
+            }
         }
         st.refresh_preload();
         if (st.dbus_) {
