@@ -605,7 +605,7 @@ void draw_main_view(AppState& st) {
                 now - st.hw_volume_last_poll > std::chrono::milliseconds(250)) {
                 st.hw_volume_pct = engine::get_hw_volume_pct(hw_string);
                 if (st.hw_volume_pct < 0) { st.hw_volume_pct = 0; }
-                // Also poll mute state via same mechanism (pct returns -1 if control absent)
+                st.hw_volume_muted = engine::get_hw_mute_state(hw_string);
                 st.hw_volume_last_poll = now;
             }
             int pct = st.hw_volume_pct;

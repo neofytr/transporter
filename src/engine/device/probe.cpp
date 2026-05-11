@@ -363,4 +363,21 @@ void toggle_hw_mute(const std::string& alsa_hw_string) {
     snd_mixer_selem_set_playback_switch_all(elem, sw ? 0 : 1);
 }
 
+bool get_hw_mute_state(const std::string& alsa_hw_string) {
+    const int ci = card_index_from_hw(alsa_hw_string);
+    if (ci < 0) {
+        return false;
+    }
+    auto [mix, elem] = detail::open_mixer_elem(ci);
+    if (!mix || !elem) {
+        return false;
+    }
+    if (!snd_mixer_selem_has_playback_switch(elem)) {
+        return false;
+    }
+    int sw = 1; // assume unmuted if read fails
+    snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_FRONT_LEFT, &sw);
+    return sw == 0; // switch=0 means muted in ALSA
+}
+
 } // namespace transporter::engine

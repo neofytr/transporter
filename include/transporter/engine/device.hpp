@@ -93,6 +93,8 @@ int get_hw_volume_pct(const std::string& alsa_hw_string);
 // No-op when hw_volume is absent. pct is clamped to [0, 100].
 void set_hw_volume_pct(const std::string& alsa_hw_string, int pct);
 void toggle_hw_mute(const std::string& alsa_hw_string);
+// Returns true when muted, false when unmuted or when there is no mute switch.
+bool get_hw_mute_state(const std::string& alsa_hw_string);
 
 } // namespace transporter::engine
 
