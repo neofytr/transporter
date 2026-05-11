@@ -209,6 +209,19 @@ void AppState::queue_append(std::filesystem::path p) {
     recompute_queue_duration();
 }
 
+void AppState::queue_insert_next(std::filesystem::path p) {
+    {
+        std::lock_guard lk(queue_mtx);
+        const std::int32_t ins = queue_index + 1;
+        if (ins <= 0 || ins > static_cast<std::int32_t>(queue.size())) {
+            queue.emplace_back(std::move(p));
+        } else {
+            queue.insert(queue.begin() + ins, std::move(p));
+        }
+    }
+    recompute_queue_duration();
+}
+
 bool AppState::queue_jump_to(std::int32_t idx) {
     if (engine_ == nullptr) {
         return false;

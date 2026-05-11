@@ -368,6 +368,15 @@ void draw_main_view(AppState& st) {
             frac * static_cast<float>(snap.source.total_frames));
         (void)st.engine_->seek(target);
     }
+    if (ImGui::IsItemHovered() && total_ms > 0) {
+        const float hover_frac = (ImGui::GetMousePos().x - ImGui::GetItemRectMin().x) /
+                                 (ImGui::GetItemRectMax().x - ImGui::GetItemRectMin().x);
+        const std::int64_t hover_ms = static_cast<std::int64_t>(
+            std::clamp(hover_frac, 0.0f, 1.0f) * static_cast<float>(total_ms));
+        char htbuf[24];
+        format_time(hover_ms, htbuf, sizeof(htbuf));
+        ImGui::SetTooltip("%s", htbuf);
+    }
     // Waveform overlay — drawn into the seek slider's bounding rect.
     if (st.waveform_ready.load(std::memory_order_acquire)) {
         const ImVec2 rmin = ImGui::GetItemRectMin();

@@ -185,6 +185,9 @@ void draw_library_view(AppState& st) {
                     if (ImGui::MenuItem("Play now")) {
                         play_track(st, t);
                     }
+                    if (ImGui::MenuItem("Play next")) {
+                        st.queue_insert_next(t.path);
+                    }
                     if (ImGui::MenuItem("Add to queue")) {
                         st.queue_append(t.path);
                     }
@@ -289,6 +292,9 @@ void draw_library_view(AppState& st) {
                                 if (ImGui::BeginPopupContextItem()) {
                                     if (ImGui::MenuItem("Play now")) {
                                         play_album(st, *tracks, ti);
+                                    }
+                                    if (ImGui::MenuItem("Play next")) {
+                                        st.queue_insert_next((*tracks)[ti].path);
                                     }
                                     if (ImGui::MenuItem("Add to queue")) {
                                         st.queue_append((*tracks)[ti].path);
