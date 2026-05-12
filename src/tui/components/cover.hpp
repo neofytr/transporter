@@ -7,6 +7,9 @@
 #include <memory>
 #include <vector>
 
+struct ncplane;
+struct ncvisual;
+
 namespace transporter::tui::components {
 
 // Decoded RGBA pixel buffer. R in the low byte (memory order R, G, B, A).
@@ -36,6 +39,29 @@ Cover decode_embedded(const std::vector<unsigned char>& bytes);
 //        albumart*.{jpg,jpeg,png}
 //   3. Empty Cover otherwise.
 Cover load_cover_for_track(const std::filesystem::path& track_path);
+
+// Build an ncvisual from a Cover. The visual takes its own copy of the pixel
+// data; the Cover can be freed after this call. Returns nullptr if cov is
+// empty or notcurses rejects the input.
+ncvisual* visual_from_cover(const Cover& cov);
+
+// Blitter dispatch — pick the best supported blitter for the current terminal.
+//   - kitty graphics or sixel  -> NCBLIT_PIXEL
+//   - truecolor without pixel  -> NCBLIT_2x2 (quadrants)
+//   - everything else          -> NCBLIT_DEFAULT (halfblock)
+// Inside tmux, kitty-graphics is suppressed in favour of sixel.
+struct BlitChoice {
+    int  blitter = 0;     // ncblitter_e value
+    bool pixel   = false; // true when the chosen blitter is NCBLIT_PIXEL
+};
+
+BlitChoice pick_blitter();
+
+// Blit `vis` into `dst` at the cell rect (y, x, cells_h, cells_w). Returns 0
+// on success, non-zero on failure. Stretch-scaled; uses the blitter chosen
+// by pick_blitter().
+int blit_into(struct ncplane* dst, struct ncvisual* vis,
+              int y, int x, int cells_h, int cells_w);
 
 } // namespace transporter::tui::components
 

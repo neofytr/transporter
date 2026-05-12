@@ -5,6 +5,10 @@
 
 #include "cover.hpp"
 
+#include "../notcurses_ctx.hpp"
+
+#include <notcurses/notcurses.h>
+
 #include <png.h>
 #include <jpeglib.h>
 #include <setjmp.h>  // libjpeg / libpng error recovery
@@ -330,6 +334,71 @@ Cover load_cover_for_track(const std::filesystem::path& track_path) {
         return {};
     }
     return decode_image(art);
+}
+
+ncvisual* visual_from_cover(const Cover& cov) {
+    if (!cov) {
+        return nullptr;
+    }
+    const int rowstride = cov.width * 4;
+    return ncvisual_from_rgba(cov.pixels.get(), cov.height, rowstride,
+                              cov.width);
+}
+
+BlitChoice pick_blitter() {
+    BlitChoice c;
+    const Capabilities caps = probe_capabilities();
+    // tmux defeats kitty graphics without explicit passthrough; sixel works
+    // through tmux when the outer terminal supports it.
+    const bool prefer_pixel = (caps.sixel)
+                           || (caps.kitty_graphics && !caps.inside_tmux);
+    if (prefer_pixel) {
+        c.blitter = NCBLIT_PIXEL;
+        c.pixel = true;
+    } else if (caps.truecolor && caps.unicode) {
+        c.blitter = NCBLIT_2x2;
+    } else {
+        c.blitter = NCBLIT_DEFAULT;
+    }
+    return c;
+}
+
+int blit_into(struct ncplane* dst, struct ncvisual* vis,
+              int y, int x, int cells_h, int cells_w) {
+    if (dst == nullptr || vis == nullptr || cells_h <= 0 || cells_w <= 0) {
+        return -1;
+    }
+    notcurses* nc = ncplane_notcurses(dst);
+    if (nc == nullptr) {
+        return -1;
+    }
+
+    // Carve out a child plane on which the visual lands. Using a child plane
+    // avoids stomping cells the caller didn't ask for and lets ncvisual_blit
+    // pick its own row/column packing.
+    ncplane_options opts{};
+    opts.y    = y;
+    opts.x    = x;
+    opts.rows = static_cast<unsigned>(cells_h);
+    opts.cols = static_cast<unsigned>(cells_w);
+    struct ncplane* plane = ncplane_create(dst, &opts);
+    if (plane == nullptr) {
+        return -1;
+    }
+
+    const BlitChoice bc = pick_blitter();
+    ncvisual_options vopts{};
+    vopts.n       = plane;
+    vopts.scaling = NCSCALE_STRETCH;
+    vopts.blitter = static_cast<ncblitter_e>(bc.blitter);
+    vopts.flags   = 0;
+
+    if (ncvisual_blit(nc, vis, &vopts) == nullptr) {
+        ncplane_destroy(plane);
+        return -1;
+    }
+    // Plane is owned by `dst` (the parent) and will be torn down with it.
+    return 0;
 }
 
 } // namespace transporter::tui::components
