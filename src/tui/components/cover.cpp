@@ -38,6 +38,65 @@ std::string ext_lower(const std::filesystem::path& p) {
     return to_lower(std::move(e));
 }
 
+// Candidate filenames in priority order. Matched case-insensitively;
+// `is_prefix` enables the AlbumArt*.png convention (basename starts-with).
+struct Candidate {
+    const char* prefix;     // lowercase basename (or basename prefix)
+    const char* ext;        // lowercase extension without dot
+    bool        is_prefix;
+};
+
+constexpr Candidate kCandidates[] = {
+    {"cover",     "jpg",  false}, {"cover",     "jpeg", false}, {"cover",    "png",  false},
+    {"folder",    "jpg",  false}, {"folder",    "jpeg", false}, {"folder",   "png",  false},
+    {"front",     "jpg",  false}, {"front",     "jpeg", false}, {"front",    "png",  false},
+    {"albumart",  "jpg",  true},  {"albumart",  "jpeg", true},  {"albumart", "png",  true},
+};
+
+// Returns the path of the first matching art file in `dir`, or empty.
+std::filesystem::path find_art_file(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) {
+        return {};
+    }
+
+    struct Entry {
+        std::string basename_lower;
+        std::string ext_lower;
+        fs::path    full;
+    };
+    std::vector<Entry> entries;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        if (!e.is_regular_file(ec)) {
+            continue;
+        }
+        Entry x;
+        x.full = e.path();
+        x.basename_lower = to_lower(e.path().stem().string());
+        x.ext_lower      = ext_lower(e.path());
+        entries.push_back(std::move(x));
+    }
+
+    for (const Candidate& cand : kCandidates) {
+        for (const Entry& e : entries) {
+            if (e.ext_lower != cand.ext) {
+                continue;
+            }
+            if (cand.is_prefix) {
+                if (e.basename_lower.rfind(cand.prefix, 0) == 0) {
+                    return e.full;
+                }
+            } else {
+                if (e.basename_lower == cand.prefix) {
+                    return e.full;
+                }
+            }
+        }
+    }
+    return {};
+}
+
 // ── PNG ──────────────────────────────────────────────────────────────────────
 
 Cover load_png(const std::filesystem::path& path) {
@@ -252,6 +311,25 @@ Cover decode_embedded(const std::vector<unsigned char>& bytes) {
     std::error_code ec;
     fs::remove(tmppath, ec);
     return c;
+}
+
+Cover load_cover_for_track(const std::filesystem::path& track_path) {
+    // Placeholder for embedded picture extraction: when decoders surface
+    // PICTURE blocks via Tags, sniff + decode_embedded() here and return on
+    // success. Until then, fall through to the sidecar lookup.
+
+    if (track_path.empty()) {
+        return {};
+    }
+    std::filesystem::path dir = track_path;
+    if (dir.has_filename()) {
+        dir = dir.parent_path();
+    }
+    const std::filesystem::path art = find_art_file(dir);
+    if (art.empty()) {
+        return {};
+    }
+    return decode_image(art);
 }
 
 } // namespace transporter::tui::components

@@ -26,6 +26,17 @@ Cover decode_image(const std::filesystem::path& path);
 // FLAC PICTURE block payload). Returns empty Cover on failure.
 Cover decode_embedded(const std::vector<unsigned char>& bytes);
 
+// Find the cover for a track. Strategy (Picard / Wikipedia conventions):
+//   1. Embedded picture extraction — placeholder; wired in a later phase
+//      when decoder Tags expose a picture payload.
+//   2. Sidecar files in the track's directory, case-insensitive on filename:
+//        cover.{jpg,jpeg,png}
+//        folder.{jpg,jpeg,png}
+//        front.{jpg,jpeg,png}
+//        albumart*.{jpg,jpeg,png}
+//   3. Empty Cover otherwise.
+Cover load_cover_for_track(const std::filesystem::path& track_path);
+
 } // namespace transporter::tui::components
 
 #endif
