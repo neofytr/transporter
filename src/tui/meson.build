@@ -24,6 +24,7 @@ tui_lib = static_library(
   'components/player_bar.cpp',
   'components/cover.cpp',
   'components/cover_cache.cpp',
+  'components/seekbar.cpp',
   'pages/draw_util.cpp',
   'pages/library.cpp',
   'pages/album_detail.cpp',

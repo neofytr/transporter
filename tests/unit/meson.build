@@ -206,3 +206,10 @@ test_tui_cover = executable(
 )
 test('tui_cover', test_tui_cover)
 
+test_tui_seekbar = executable(
+  'test_tui_seekbar',
+  'tui_seekbar.cpp',
+  dependencies : [tui_dep, doctest_dep],
+)
+test('tui_seekbar', test_tui_seekbar)
+
