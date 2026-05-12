@@ -26,6 +26,7 @@ tui_lib = static_library(
   'components/cover_cache.cpp',
   'components/seekbar.cpp',
   'components/transport.cpp',
+  'components/toast.cpp',
   'pages/draw_util.cpp',
   'pages/library.cpp',
   'pages/album_detail.cpp',
