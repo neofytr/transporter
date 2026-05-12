@@ -197,7 +197,9 @@ struct Engine::Impl {
     // consumed by decoder_thread_fn_ on current-track EOF when the format
     // matches exactly. Protected by next_mtx; the decoder thread acquires it
     // only at EOF (infrequent), so there is no contention on the hot path.
-    std::mutex next_mtx;
+    // Mutex is mutable so pipeline_snapshot() (const) can sample the staged
+    // next-decoder format for gapless_pending.
+    mutable std::mutex next_mtx;
     std::unique_ptr<IDecoder> next_decoder;
     std::filesystem::path next_path;
 
@@ -1523,6 +1525,31 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
         impl_->frames_written_at_track_start.load(std::memory_order_relaxed);
     s.output.xrun_count =
         impl_->xrun_count.load(std::memory_order_relaxed);
+
+    // Gapless pending: a same-rate decoder is staged for swap on EOF and the
+    // current track is within ~2s of its end. The decoder thread runs the
+    // actual swap in decoder_thread_fn_; we just observe the same predicate
+    // it will hit. Guarded by next_mtx (rare contention -- only on preload
+    // posts and the per-snapshot read).
+    {
+        std::lock_guard nlk(impl_->next_mtx);
+        if (impl_->next_decoder && fmt_now.sample_rate_hz > 0) {
+            const PcmFormat nfmt = impl_->next_decoder->format();
+            const bool fmt_matches =
+                nfmt.sample_rate_hz == fmt_now.sample_rate_hz &&
+                nfmt.channels == fmt_now.channels &&
+                nfmt.sample_format == fmt_now.sample_format;
+            const std::uint64_t played =
+                s.output.frames_written - s.output.frames_written_at_track_start;
+            const std::uint64_t total = s.source.total_frames;
+            const std::uint64_t remaining =
+                (total > played) ? (total - played) : 0u;
+            const std::uint64_t two_sec_frames =
+                2ull * fmt_now.sample_rate_hz;
+            s.output.gapless_pending =
+                fmt_matches && total > 0 && remaining <= two_sec_frames;
+        }
+    }
 
     // Ring fill: capacity is what the ring was constructed with; live fill
     // is the audio-thread-published readable() snapshot.

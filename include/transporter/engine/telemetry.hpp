@@ -64,6 +64,10 @@ struct OutputStage {
     std::uint64_t frames_written = 0;                  // session-wide
     std::uint64_t frames_written_at_track_start = 0;   // baseline for current track
     std::uint32_t xrun_count = 0;                      // session-wide
+    // True when a same-rate next-track decoder is staged, its format
+    // matches the live hw_params, and the current track is within ~2s
+    // of its end -> the swap will happen without ALSA close/reopen.
+    bool gapless_pending = false;
 };
 
 struct DeviceStage {
