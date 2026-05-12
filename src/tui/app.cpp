@@ -14,6 +14,8 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <string_view>
 
 namespace transporter::tui {
@@ -63,6 +65,27 @@ struct AppState {
 };
 
 constexpr int kHintRows = 1;
+constexpr int kMinCols = 60;
+constexpr int kMinRows = 20;
+
+void draw_too_small(struct ncplane* host, int rows, int cols) {
+    ncplane_erase(host);
+    constexpr std::string_view msg = "terminal too small — resize or use --daemon";
+    const int y = rows / 2;
+    const int x = (cols - static_cast<int>(msg.size())) / 2;
+    if (y >= 0 && x >= 0) {
+        ncplane_putstr_yx(host, y, x, msg.data());
+    }
+    std::array<char, 32> dims{};
+    std::snprintf(dims.data(), dims.size(), "(%d x %d, need 60 x 20)",
+                  cols, rows);
+    const int x2 = (cols - static_cast<int>(std::strlen(dims.data()))) / 2;
+    if (y + 1 < rows && x2 >= 0) {
+        ncplane_set_fg_rgb8(host, 0x70, 0x70, 0x70);
+        ncplane_putstr_yx(host, y + 1, x2, dims.data());
+        ncplane_set_fg_default(host);
+    }
+}
 
 void draw_hint(struct ncplane* host, int y, int cols, std::string_view hint) {
     ncplane_set_fg_rgb8(host, 0x70, 0x70, 0x70);
@@ -81,6 +104,13 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
     unsigned rows = 0, cols = 0;
     ncplane_dim_yx(std_plane, &rows, &cols);
     ncplane_erase(std_plane);
+
+    if (static_cast<int>(rows) < kMinRows || static_cast<int>(cols) < kMinCols) {
+        draw_too_small(std_plane, static_cast<int>(rows),
+                       static_cast<int>(cols));
+        notcurses_render(nc);
+        return;
+    }
 
     const int body_rows = static_cast<int>(rows)
                         - components::kPlayerBarRows - kHintRows;
