@@ -18,6 +18,7 @@ tui_lib = static_library(
   'transporter_tui',
   'notcurses_ctx.cpp',
   'app.cpp',
+  'components/player_bar.cpp',
   include_directories : [inc_public, include_directories('..')],
   dependencies : [engine_dep, library_dep, config_dep, notcurses_dep],
 )
