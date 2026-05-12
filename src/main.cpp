@@ -279,14 +279,18 @@ int main(int argc, char** argv) {
 
     if (daemon) {
         wait_for_termination_signal();
-    } else if (transporter::tui::init() != 0) {
-        std::fprintf(stderr,
-                     "transporter: notcurses init failed, "
-                     "falling back to daemon mode\n");
-        wait_for_termination_signal();
     } else {
-        transporter::tui::run(engine.get(), library.get());
-        transporter::tui::shutdown();
+        transporter::tui::InitOptions iopts{};
+        iopts.enable_mouse = !args.no_mouse;
+        if (transporter::tui::init(iopts) != 0) {
+            std::fprintf(stderr,
+                         "transporter: notcurses init failed, "
+                         "falling back to daemon mode\n");
+            wait_for_termination_signal();
+        } else {
+            transporter::tui::run(engine.get(), library.get());
+            transporter::tui::shutdown();
+        }
     }
 
     // Teardown order: stop dbus before engine; library + engine drop on

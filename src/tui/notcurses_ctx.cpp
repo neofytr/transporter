@@ -94,7 +94,7 @@ Capabilities probe_capabilities() {
     return c;
 }
 
-int init() {
+int init(const InitOptions& iopts) {
     if (g_nc.load(std::memory_order_acquire) != nullptr) {
         return 0;
     }
@@ -102,6 +102,9 @@ int init() {
     struct notcurses* nc = notcurses_core_init(&opts, stdout);
     if (nc == nullptr) {
         return -1;
+    }
+    if (iopts.enable_mouse) {
+        notcurses_mice_enable(nc, NCMICE_BUTTON_EVENT | NCMICE_DRAG_EVENT);
     }
     g_nc.store(nc, std::memory_order_release);
     return 0;

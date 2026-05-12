@@ -28,8 +28,12 @@ struct Capabilities {
 // failure the returned struct holds only the env-derived fields.
 Capabilities probe_capabilities();
 
+struct InitOptions {
+    bool enable_mouse = true;
+};
+
 // Initialise notcurses, take over the terminal. Returns 0 on success.
-int init();
+int init(const InitOptions& opts = {});
 
 // Tear down notcurses cleanly. Idempotent.
 void shutdown();
