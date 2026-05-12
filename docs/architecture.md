@@ -4,7 +4,7 @@ This document describes the runtime architecture of `transporter` and supplement
 
 ## High-level shape
 
-`transporter` is a single binary. Internally it has six modules organized so that the audio engine has zero dependency on UI:
+`transporter` is a single binary. Internally it has five modules organized so that the audio engine has zero dependency on the frontend:
 
 ```
                 ┌─────────────────────────────┐
@@ -14,18 +14,19 @@ This document describes the runtime architecture of `transporter` and supplement
                                │ wires up
         ┌──────────┬───────────┼───────────┬──────────────┐
         ▼          ▼           ▼           ▼              ▼
-    ┌───────┐  ┌─────────┐  ┌──────┐  ┌────────┐  ┌────────────┐
-    │ gui/  │  │ library │  │theme/│  │ dbus/  │  │  hotplug/  │
-    │       │  │   /     │  │      │  │ MPRIS+ │  │            │
-    └───┬───┘  └────┬────┘  └───┬──┘  └────┬───┘  └─────┬──────┘
-        │           │           │          │             │
-        └───────────┼───────────┼──────────┼─────────────┘
-                    │           │          │
-                    ▼           ▼          ▼
+    ┌───────┐  ┌─────────┐  ┌─────────┐  ┌────────┐  ┌────────────┐
+    │ tui/  │  │ library │  │ config/ │  │ dbus/  │  │  hotplug/  │
+    │(notc- │  │   /     │  │         │  │ MPRIS+ │  │            │
+    │urses) │  └────┬────┘  └───┬─────┘  └────┬───┘  └─────┬──────┘
+    └───┬───┘       │           │              │             │
+        │           │           │              │             │
+        └───────────┼───────────┼──────────────┼─────────────┘
+                    │           │              │
+                    ▼           ▼              ▼
                 ┌─────────────────────────┐
                 │      engine/  (lib)      │  ← no UI deps; reusable
                 │  decoder, format, alsa,  │
-                │  ring, rt, fsm           │
+                │  ring, rt, fsm, spectrum │
                 └────────────┬─────────────┘
                              │
                        ┌─────┴─────┐
@@ -37,27 +38,32 @@ This document describes the runtime architecture of `transporter` and supplement
                        └───────────┘
 ```
 
-`engine/` is the only module on the audio path. Everything else is control or presentation.
+`engine/` is the only module on the audio path. Everything else is control or presentation. `tui/` and the daemon path share the same engine surface — when launched without a tty (or with `--daemon`), `main()` skips the notcurses init and runs MPRIS-only.
 
 ## Thread model
 
 | Thread | Schedule | Cardinality | Responsibilities |
 |---|---|---|---|
-| Main / UI | `SCHED_OTHER`, default nice | 1 | Wayland event loop, Dear ImGui frame loop, user input |
+| Main | `SCHED_OTHER`, default nice | 1 | argv parse, mode dispatch, wiring, shutdown |
+| TUI render | `SCHED_OTHER`, default nice | 1 (TUI mode only) | notcurses frame loop ~30 Hz active, ~5 Hz idle |
+| TUI input | `SCHED_OTHER`, default nice | 1 (TUI mode only) | notcurses keypress/mouse blocking read; posts to TUI command queue |
 | Audio | `SCHED_FIFO` priority 80 + `mlockall` + affinity (soft fallback to `SCHED_OTHER`) | 1 | `snd_pcm_writei` loop; consumes decoded frames from a lock-free ring; reports xrun events |
 | Decode | `SCHED_OTHER`, default nice | 1 | Reads file, decodes to PCM, pushes to ring buffer |
-| Library scanner | `SCHED_OTHER`, low priority | 1 | Walks library dirs, reads tags, upserts SQLite |
+| Library scanner | `SCHED_OTHER`, low priority | 1 + inotify | Walks library dirs, reads tags, upserts SQLite; reacts to filesystem events |
 | DBus | `SCHED_OTHER` | 1 | MPRIS / custom DBus method dispatch |
 | Hotplug | `SCHED_OTHER` | 1 | udev watcher for ALSA card add / remove |
+| Spectrum / VU consumer | `SCHED_OTHER` | 0 or 1 (RAII attach) | FFT + dBFS smoothing for live viz; only spawned while Now Playing is active |
+| Waveform pre-decode | `SCHED_OTHER` | 0 or 1 (per-track lazy) | Background decode + peak/RMS envelope build; LRU 20 |
 
-Total typical threads: 6. No thread pools. No fork. No anonymous helper threads.
+Total typical threads: 7–9. No thread pools. No fork. No anonymous helper threads.
 
 ### Inter-thread communication
 
 - **Control → Audio.** Lock-free SPSC ring of small command messages (`load_track`, `play`, `pause`, `stop`, `set_volume`, …). Audio thread polls non-blockingly each cycle.
 - **Decode → Audio.** Lock-free SPSC ring of PCM frames. Pre-allocated at engine init, sized for ~250 ms of headroom at 192k/24/2ch. Audio thread reads; decode thread writes.
-- **Audio → Telemetry.** Lock-free SPSC ring of trace events / xrun reports. Drained on the control thread.
-- **Engine ↔ GUI / DBus / etc.** Snapshot pattern: subscribers register callbacks; engine dispatches them on a worker thread (never on audio thread).
+- **Audio → Spectrum/VU consumer.** Lock-free SPSC ring of channel samples. **Allocated only while a consumer handle is alive** (`engine.attach_spectrum_consumer()`). Audio thread checks an atomic `consumer_active` before writing — when no consumer attached, the tap is fully no-op.
+- **Audio → Telemetry.** Lock-free SPSC ring of trace events / xrun reports. Drained on a control thread.
+- **Engine ↔ TUI / DBus / etc.** Snapshot pattern: subscribers register callbacks; engine dispatches them on a worker thread (never on audio thread).
 
 ## Project layout
 
@@ -71,42 +77,59 @@ transporter/
 │   │   ├── ring/       # lock-free SPSC ring buffer
 │   │   ├── rt/         # RT thread setup, mlockall, affinity, fallback
 │   │   ├── trace/      # lock-free trace buffer
+│   │   ├── spectrum/   # RAII-attached audio-thread tap for viz consumers
 │   │   ├── device/     # DeviceFingerprint, hotplug glue
 │   │   ├── fsm.cpp     # state machine
 │   │   └── engine.cpp  # public API impl
-│   ├── library/        # SQLite tag DB + scanner thread
+│   ├── library/        # SQLite tag DB + scanner thread + inotify watcher
 │   │   ├── schema.cpp  # DDL + migrations
-│   │   ├── scanner.cpp # walk + upsert
-│   │   └── queries.cpp # all SQL strings (centralized)
-│   ├── gui/            # Dear ImGui platform + widgets
-│   │   ├── platform/   # Wayland + EGL + GL backend for ImGui
-│   │   ├── views/      # main, library, settings, error
-│   │   └── widgets/    # custom widgets (file picker, etc.)
-│   ├── theme/          # Hyprland config parser → theme model
+│   │   ├── scanner.cpp # walk + upsert + inotify
+│   │   └── queries.hpp # all SQL strings (centralized)
+│   ├── tui/            # notcurses-driven terminal frontend
+│   │   ├── notcurses_ctx.cpp/hpp   # init/teardown, capability probe
+│   │   ├── app.cpp/hpp             # top-level state, event loop, page registry
+│   │   ├── input.cpp/hpp           # vi-modal keymap, command palette
+│   │   ├── theme.cpp/hpp           # dominant-color accent extraction
+│   │   ├── session.cpp/hpp         # save/restore queue + position + page
+│   │   ├── components/             # player_bar, seekbar, spectrum, vu_meter,
+│   │   │                           # cover, transport, list, toast, banner
+│   │   ├── pages/                  # library, album_detail, queue, now_playing,
+│   │   │                           # pipeline, settings, search_overlay,
+│   │   │                           # dac_popup, help_overlay
+│   │   └── dsp/                    # waveform_envelope, spectrum_consumer, vu_consumer
 │   ├── dbus/           # MPRIS + custom interface
 │   ├── hotplug/        # libudev watcher
 │   ├── config/         # TOML config loader
 │   └── main.cpp        # argv parsing, mode dispatch, wiring
 ├── include/
 │   └── transporter/
-│       └── engine/     # public engine headers
-│           ├── engine.hpp
-│           ├── device.hpp
-│           ├── track.hpp
-│           ├── format.hpp
-│           ├── error.hpp
-│           └── events.hpp
+│       ├── engine/     # public engine headers
+│       │   ├── engine.hpp
+│       │   ├── device.hpp
+│       │   ├── format.hpp
+│       │   ├── error.hpp
+│       │   ├── ring.hpp
+│       │   ├── rt.hpp
+│       │   ├── telemetry.hpp
+│       │   └── trace.hpp
+│       ├── library/
+│       │   └── library.hpp
+│       ├── hotplug/
+│       │   └── monitor.hpp
+│       ├── config/
+│       │   └── config.hpp
+│       └── dbus/
+│           └── service.hpp
 ├── tests/
 │   ├── unit/
-│   ├── integration/
+│   ├── integration/    # registered with `meson test`; hardware-gated tests SKIP-77 gracefully
 │   └── fixtures/       # known-good audio files at various rates / depths
 ├── docs/
 │   ├── spec/
 │   ├── architecture.md (this)
 │   └── phases.md
-├── third_party/        # vendored deps (Dear ImGui)
+├── third_party/        # vendored deps (alac, doctest, kissfft, tomlpp)
 ├── packaging/
-│   └── transporter.desktop
 ├── meson.build
 ├── meson_options.txt
 ├── LICENSE
@@ -115,7 +138,7 @@ transporter/
 
 ## Public engine API (sketch)
 
-The engine module exposes a small surface. UI / DBus / scripts use only this. Headers under `include/transporter/engine/`.
+The engine module exposes a small surface. TUI / DBus / scripts use only this. Headers under `include/transporter/engine/`.
 
 ```cpp
 // error.hpp
@@ -179,14 +202,19 @@ namespace transporter::engine {
         void seek(std::chrono::milliseconds);
 
         // Volume — bit-perfect mode disables digital path
-        void set_volume(float linear);   // 0.0–1.0
-        float volume() const;
-        void set_bit_perfect_mode(bool);
-        bool bit_perfect_mode() const;
+        void set_hw_volume_pct(int);             // 0–100, no-op if !has_hardware_volume
+        int  get_hw_volume_pct() const;
+        void set_digital_volume_active(bool);    // engaging digital volume downgrades bit-perfect verdict
+        bool digital_volume_active() const;
 
         // State
         State state() const;
         std::optional<PlaybackInfo> playback_info() const;
+        PipelineSnapshot pipeline_snapshot() const;
+
+        // Live-viz tap (RAII-attached spectrum/VU consumer)
+        struct SpectrumHandle { /* opaque; destructor releases the ring */ };
+        SpectrumHandle attach_spectrum_consumer();
 
         // Subscriptions (callbacks fire on a worker thread, never RT)
         struct Event { /* state change, xrun, hotplug, ... */ };
@@ -197,19 +225,19 @@ namespace transporter::engine {
 }
 ```
 
-The exact shape will evolve, but the *seams* should not: Engine is owned, transport methods return `std::expected`, subscribers go to a worker thread.
+The exact shape will evolve, but the *seams* should not: Engine is owned, transport methods return `std::expected`, subscribers go to a worker thread, viz consumers are RAII-attached so they cannot leak audio-thread cost.
 
 ## Data flows
 
 ### Track load
 
 ```
-GUI → Engine::load(path)
+TUI → Engine::load(path)
     → state := Loading
     → pick decoder by extension / magic bytes
     → Decode thread: open file, read header, fill PCM ring with first frames
     → Format: check decoder's native format ∈ DAC capability
-    → If mismatch:
+    → If mismatch and resampler disabled:
             state := Error
             emit FormatRefused
             return
@@ -223,13 +251,24 @@ GUI → Engine::load(path)
 ### Playback
 
 ```
-GUI → Engine::play()
+TUI → Engine::play()
     → state := Playing
     → Audio thread: enter snd_pcm_writei loop; pull frames from ring
+    → If spectrum consumer attached: tap channel-0 samples into the spec ring
     → Decode thread: keep ring fed; on EOF, mark stream-complete
     → On stream-complete + ring drained:
             state := Idle
             emit TrackEnded
+```
+
+### Gapless transition (same rate)
+
+```
+On Engine::load(new_path) when new.rate == current.rate AND gapless_pending:
+    Decode thread swaps to new file without ALSA close
+    Snapshot: gapless_pending = false; pipeline counters carry over
+    Audio thread continues writei without re-prepare
+    Inaudible boundary (≤ 1 ms gap)
 ```
 
 ### Format change between tracks
@@ -246,12 +285,18 @@ On Engine::load(new_path) when new.rate != current.rate:
 ### Hotplug — DAC unplugged mid-playback
 
 ```
-Audio thread: snd_pcm_writei returns -ENODEV (or similar)
-    → state := Disconnected
+Path A: hotplug/ thread sees udev REMOVE matching our DeviceFingerprint
+    → engine: state := Disconnected
     → emit DeviceDisconnected
     → audio thread idles
 
-hotplug/ thread: udev sees ADD event matching our DeviceFingerprint
+Path B: audio thread's snd_pcm_writei returns -ENODEV (USB unplugged faster than udev)
+    → check_run_finish_ classifies the error as device-gone
+    → engine: state := Disconnected (idempotent with Path A)
+    → emit DeviceDisconnected
+
+On reconnect (either path):
+    hotplug/ thread sees udev ADD matching our DeviceFingerprint
     → emit DeviceReturned
     → engine: re-probe capabilities, re-open hw:, snd_pcm_prepare
     → state := previous (Playing or Paused)
@@ -261,7 +306,7 @@ hotplug/ thread: udev sees ADD event matching our DeviceFingerprint
 
 ```
 DBus thread receives org.mpris.MediaPlayer2.Player.Play
-    → Engine::play()        // same path as GUI
+    → Engine::play()        // same path as TUI
 ```
 
 ## RT discipline
@@ -278,20 +323,19 @@ The audio thread is the **only** RT-disciplined thread.
 - C++ exceptions — use sentinel returns or `std::expected`
 
 **Required:**
-- All buffers allocated at init.
+- All buffers allocated at init or via RAII-attached handles (spectrum consumer).
 - Memory locked via `mlockall(MCL_CURRENT | MCL_FUTURE)` at engine create.
 - One `std::atomic<int>` per state value the audio thread reads (so the control thread can update without locks).
 
-The trace ring is drained by a "telemetry" capability of the control thread, not by the audio thread.
+The trace ring is drained by a "telemetry" capability of the control thread, not by the audio thread. The spectrum ring (when present) is drained by the spectrum consumer thread — never on the audio thread.
 
 ## Module boundaries (and forbidden cross-cuts)
 
-- `engine/` does NOT depend on `gui/`, `library/`, `theme/`, `dbus/`, `hotplug/`. It is reusable as a library.
-- `gui/` depends on `engine/`, `library/`, `theme/`. Does NOT touch `dbus/` or `hotplug/`.
-- `dbus/` depends on `engine/`. Does NOT touch `gui/` or `library/`.
+- `engine/` does NOT depend on `tui/`, `library/`, `dbus/`, `hotplug/`. It is reusable as a library.
+- `tui/` depends on `engine/`, `library/`. Does NOT touch `dbus/` or `hotplug/` directly (engine is the only seam).
+- `dbus/` depends on `engine/`. Does NOT touch `tui/` or `library/`.
 - `hotplug/` depends on `engine/` (it produces device events the engine consumes).
 - `library/` depends on the decoder trait from `engine/decoder/` for tag reading. Does NOT depend on the playback path.
-- `theme/` is pure: input is `hyprland.conf` text, output is a theme struct. No engine deps.
 - `config/` is pure: input is TOML text, output is a config struct.
 - `main.cpp` wires everything together. It is the ONLY place that touches every module.
 
@@ -308,30 +352,38 @@ The trace ring is drained by a "telemetry" capability of the control thread, not
 
 ```toml
 [device]
-preferred = "USBDAC"     # USB serial or ALSA card name; engine picks first match
+preferred = "USBDAC"        # USB serial or ALSA card name; engine picks first match
 
 [audio]
-period_ms = 12           # override per-period wall-clock
-period_count = 4         # override period count
-rt_policy = "auto"       # "auto" | "fifo" | "other"
+period_ms = 12              # override per-period wall-clock
+period_count = 4            # override period count
+rt_policy = "auto"          # "auto" | "fifo" | "other"
 rt_priority = 80
-rt_affinity = -1         # -1 = no affinity; otherwise core index
+rt_affinity = -1            # -1 = no affinity; otherwise core index
 
 [library]
-directories = ["~/Music"]
+paths = ["~/Music"]         # multiple roots supported
 ignore = [".*", "*.tmp"]
 
-[theme]
-follow_hyprland = true
-override_file = ""       # path to a custom theme.toml
+[ui]
+mouse = true                # --no-mouse overrides
+desktop_notifications = false   # libnotify integration
+default_enter = "replace"   # "replace" | "append"
+spectrum = true             # show spectrum on Now Playing
+vu_meter = true             # show VU on Now Playing
+pipeline_refresh_hz = 10
+
+[dbus]
+mpris_art_forward = true    # write embedded picture to /tmp for mpris:artUrl
 ```
 
-Final schema is locked in `docs/spec/locked.md` once schema is committed.
+Final schema is locked in `docs/spec/locked.md` once the TUI overhaul concludes.
 
 ---
 
 ## See also
 
+- `CLAUDE.md` — design intent and public-repo discipline (top-level)
 - `docs/spec/locked.md` — formal spec with rationale
 - `docs/spec/open-questions.md` — unresolved items
-- `docs/phases.md` — implementation phase plan
+- `docs/phases.md` — implementation phase plan (T0–T12 overhaul + forward engine work)
