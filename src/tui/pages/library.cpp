@@ -13,8 +13,11 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace transporter::tui::pages {
 
@@ -59,86 +62,56 @@ int compute_rows(int avail_h) {
     return std::max(1, (avail_h + kTileGap) / (kTileHeight + kTileGap));
 }
 
-// Draw a tile at the top-left corner (y, x). When `selected`, draws a
-// rounded accent border around the cover region; otherwise leaves the
-// cover region untouched (just text labels).
-void draw_tile(struct ncplane* host,
-               int y, int x,
-               const library::Album& album,
-               components::CoverCache& cache,
-               bool selected) {
-    const int cover_x  = x;
-    const int cover_y  = y;
-    const int cover_w  = kTileWidth;
-    const int cover_h  = kCoverRows;
-
-    // 1. Cover (or placeholder).
-    bool have_cover = false;
-    if (!album.album_artist.empty() || !album.title.empty()) {
-        // Cover lookup is keyed by a representative track path; since the
-        // album row doesn't carry a path, we synthesise one with the title
-        // (cache hit-rate is good enough for v1 while session-paths land).
-        // We can't load without a track path: skip for now and leave the
-        // glyph placeholder. (T2 follow-up will key on album.id when the
-        // cover-cache gains an id-keyed overload.)
-        (void)cache;
-    }
-    if (!have_cover) {
-        // Placeholder: simple bordered box with ♫ glyph centered.
-        if (selected) {
-            set_rgb(host, kAccent);
-        } else {
-            set_rgb(host, kDim);
-        }
-        for (int row = 0; row < cover_h; ++row) {
-            for (int col = 0; col < cover_w; ++col) {
-                if (row == 0 && col == 0) {
-                    ncplane_putstr_yx(host, cover_y, cover_x, "╭");
-                } else if (row == 0 && col == cover_w - 1) {
-                    ncplane_putstr_yx(host, cover_y, cover_x + col, "╮");
-                } else if (row == cover_h - 1 && col == 0) {
-                    ncplane_putstr_yx(host, cover_y + row, cover_x, "╰");
-                } else if (row == cover_h - 1 && col == cover_w - 1) {
-                    ncplane_putstr_yx(host, cover_y + row, cover_x + col, "╯");
-                } else if (row == 0 || row == cover_h - 1) {
-                    ncplane_putstr_yx(host, cover_y + row, cover_x + col, "─");
-                } else if (col == 0 || col == cover_w - 1) {
-                    ncplane_putstr_yx(host, cover_y + row, cover_x + col, "│");
-                } else {
-                    ncplane_putchar_yx(host, cover_y + row, cover_x + col, ' ');
-                }
-            }
-        }
-        // Glyph in the middle.
-        const int gx = cover_x + cover_w / 2;
-        const int gy = cover_y + cover_h / 2;
-        ncplane_putstr_yx(host, gy, gx, "♫");
-        set_default(host);
-    }
-
-    // 2. Title.
-    const int title_y = cover_y + cover_h;
-    const int text_w  = cover_w;
+void draw_cover_placeholder(struct ncplane* host, int y, int x,
+                            int w, int h, bool selected) {
     if (selected) {
-        ncplane_set_styles(host, NCSTYLE_BOLD);
         set_rgb(host, kAccent);
     } else {
-        set_default(host);
+        set_rgb(host, kDim);
     }
-    const std::string title = clip_with_ellipsis(album.title,
-        static_cast<std::size_t>(text_w));
-    ncplane_putstr_yx(host, title_y, cover_x, title.c_str());
-    ncplane_set_styles(host, NCSTYLE_NONE);
-
-    // 3. Artist (dim).
-    set_rgb(host, kDim);
-    const std::string artist = clip_with_ellipsis(album.album_artist,
-        static_cast<std::size_t>(text_w));
-    ncplane_putstr_yx(host, title_y + 1, cover_x, artist.c_str());
+    for (int row = 0; row < h; ++row) {
+        for (int col = 0; col < w; ++col) {
+            if (row == 0 && col == 0) {
+                ncplane_putstr_yx(host, y, x, "╭");
+            } else if (row == 0 && col == w - 1) {
+                ncplane_putstr_yx(host, y, x + col, "╮");
+            } else if (row == h - 1 && col == 0) {
+                ncplane_putstr_yx(host, y + row, x, "╰");
+            } else if (row == h - 1 && col == w - 1) {
+                ncplane_putstr_yx(host, y + row, x + col, "╯");
+            } else if (row == 0 || row == h - 1) {
+                ncplane_putstr_yx(host, y + row, x + col, "─");
+            } else if (col == 0 || col == w - 1) {
+                ncplane_putstr_yx(host, y + row, x + col, "│");
+            } else {
+                ncplane_putchar_yx(host, y + row, x + col, ' ');
+            }
+        }
+    }
+    const int gx = x + w / 2;
+    const int gy = y + h / 2;
+    ncplane_putstr_yx(host, gy, gx, "♫");
     set_default(host);
 }
 
 } // namespace
+
+std::filesystem::path LibraryPage::album_path(std::int64_t album_id) {
+    auto it = album_track_path_.find(album_id);
+    if (it != album_track_path_.end()) {
+        return it->second;
+    }
+    if (lib_ == nullptr) {
+        return {};
+    }
+    auto r = lib_->tracks_in_album(album_id);
+    std::filesystem::path p;
+    if (r.has_value() && !r.value().empty()) {
+        p = r.value().front().path;
+    }
+    album_track_path_.emplace(album_id, p);
+    return p;
+}
 
 LibraryPage::LibraryPage(library::Library* lib) : lib_(lib) {
     refresh();
@@ -238,8 +211,50 @@ void LibraryPage::draw(struct ncplane* host, int body_y0, int body_rows) {
                 break;
             }
             const bool selected = (album_idx == selected_);
-            draw_tile(host, tile_y, tile_x, albums_[album_idx],
-                      cover_cache_, selected);
+            const library::Album& album = albums_[album_idx];
+
+            // 1. Cover blit when we have an art file; otherwise placeholder.
+            bool blitted = false;
+            const std::filesystem::path tpath = album_path(album.id);
+            if (!tpath.empty()) {
+                auto cov = cover_cache_.get_or_load(tpath,
+                    [&]{ return components::load_cover_for_track(tpath); });
+                if (cov) {
+                    ncvisual* vis = components::visual_from_cover(*cov);
+                    if (vis != nullptr) {
+                        if (components::blit_into(host, vis, tile_y, tile_x,
+                                                  kCoverRows, kTileWidth) == 0) {
+                            blitted = true;
+                        }
+                        ncvisual_destroy(vis);
+                    }
+                }
+            }
+            if (!blitted) {
+                draw_cover_placeholder(host, tile_y, tile_x,
+                                       kTileWidth, kCoverRows, selected);
+            }
+
+            // 2. Title.
+            const int title_y = tile_y + kCoverRows;
+            const int text_w  = kTileWidth;
+            if (selected) {
+                ncplane_set_styles(host, NCSTYLE_BOLD);
+                set_rgb(host, kAccent);
+            } else {
+                set_default(host);
+            }
+            const std::string title = clip_with_ellipsis(album.title,
+                static_cast<std::size_t>(text_w));
+            ncplane_putstr_yx(host, title_y, tile_x, title.c_str());
+            ncplane_set_styles(host, NCSTYLE_NONE);
+
+            // 3. Artist (dim).
+            set_rgb(host, kDim);
+            const std::string artist = clip_with_ellipsis(album.album_artist,
+                static_cast<std::size_t>(text_w));
+            ncplane_putstr_yx(host, title_y + 1, tile_x, artist.c_str());
+            set_default(host);
         }
     }
 }

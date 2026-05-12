@@ -41,6 +41,8 @@ enum class Command : std::uint8_t {
     ScrollUp,
     ScrollDown,
     MouseClick,
+    QueueAppend,        // 'a' — append selected to queue
+    QueuePlayNext,      // 'A' — play selected next (after current)
 };
 
 struct CommandResult {

@@ -6,8 +6,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct ncplane;
@@ -59,12 +61,21 @@ private:
     std::vector<library::Album> albums_;
     components::CoverCache cover_cache_{50};
 
+    // Resolved on first use; album-id -> representative-track-path for the
+    // sidecar cover lookup. Tracks are queried lazily — we don't preload the
+    // whole library on page entry.
+    std::unordered_map<std::int64_t, std::filesystem::path> album_track_path_;
+
     std::size_t selected_ = 0;     // index into albums_
     std::size_t scroll_row_ = 0;   // top row of visible window
     int last_cols_ = 1;            // columns from last draw()
     int last_rows_ = 1;            // rows from last draw()
 
     void clamp_selection();
+
+    // Returns the path of one track in `album_id`, or empty path on miss.
+    // Cached after the first resolution.
+    std::filesystem::path album_path(std::int64_t album_id);
 };
 
 } // namespace transporter::tui::pages

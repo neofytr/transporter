@@ -5,6 +5,7 @@
 #include "components/player_bar.hpp"
 #include "input.hpp"
 #include "notcurses_ctx.hpp"
+#include "pages/album_detail.hpp"
 #include "pages/library.hpp"
 #include "pages/pages.hpp"
 
@@ -18,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string_view>
 
 namespace transporter::tui {
@@ -29,14 +31,25 @@ constexpr int kPageCount = 5;
 struct AppState {
     PageId active_page = PageId::Library;
     pages::LibraryPage library_page;
+    pages::AlbumDetailPage album_detail;
+    std::optional<std::int64_t> viewing_album;
 
-    explicit AppState(library::Library* lib) : library_page(lib) {}
+    AppState(library::Library* lib, engine::Engine* eng)
+        : library_page(lib), album_detail(lib, eng) {}
+
+    bool in_album_detail() const noexcept {
+        return viewing_album.has_value();
+    }
 };
 
 void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows) {
     switch (state.active_page) {
     case PageId::Library:
-        state.library_page.draw(p, body_y0, body_rows);
+        if (state.in_album_detail()) {
+            state.album_detail.draw(p, body_y0, body_rows);
+        } else {
+            state.library_page.draw(p, body_y0, body_rows);
+        }
         break;
     case PageId::Queue:
         pages::draw_queue(p, body_y0, body_rows);
@@ -125,8 +138,12 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
     const int hint_y = static_cast<int>(rows)
                      - components::kPlayerBarRows - kHintRows;
     if (hint_y >= 0) {
+        const int subview =
+            (state.active_page == PageId::Library && state.in_album_detail())
+                ? 1 : 0;
         draw_hint(std_plane, hint_y, static_cast<int>(cols),
-                  pages::hint_for(static_cast<int>(state.active_page)));
+                  pages::hint_for(static_cast<int>(state.active_page),
+                                  subview));
     }
 
     if (engine != nullptr) {
@@ -180,43 +197,90 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
         }
         return true;
     case Command::MoveLeft:
-        if (state.active_page == PageId::Library) {
+        if (state.active_page == PageId::Library && !state.in_album_detail()) {
             state.library_page.move_left(cr.count);
         }
         return true;
     case Command::MoveRight:
-        if (state.active_page == PageId::Library) {
+        if (state.active_page == PageId::Library && !state.in_album_detail()) {
             state.library_page.move_right(cr.count);
         }
         return true;
     case Command::MoveUp:
         if (state.active_page == PageId::Library) {
-            state.library_page.move_up(cr.count);
+            if (state.in_album_detail()) {
+                state.album_detail.move_up(cr.count);
+            } else {
+                state.library_page.move_up(cr.count);
+            }
         }
         return true;
     case Command::MoveDown:
         if (state.active_page == PageId::Library) {
-            state.library_page.move_down(cr.count);
+            if (state.in_album_detail()) {
+                state.album_detail.move_down(cr.count);
+            } else {
+                state.library_page.move_down(cr.count);
+            }
         }
         return true;
     case Command::GotoTop:
         if (state.active_page == PageId::Library) {
-            state.library_page.goto_top();
+            if (state.in_album_detail()) {
+                state.album_detail.goto_top();
+            } else {
+                state.library_page.goto_top();
+            }
         }
         return true;
     case Command::GotoBottom:
         if (state.active_page == PageId::Library) {
-            state.library_page.goto_bottom();
+            if (state.in_album_detail()) {
+                state.album_detail.goto_bottom();
+            } else {
+                state.library_page.goto_bottom();
+            }
         }
         return true;
     case Command::ScrollDown:
         if (state.active_page == PageId::Library) {
-            state.library_page.half_page_down();
+            if (state.in_album_detail()) {
+                state.album_detail.half_page_down();
+            } else {
+                state.library_page.half_page_down();
+            }
         }
         return true;
     case Command::ScrollUp:
         if (state.active_page == PageId::Library) {
-            state.library_page.half_page_up();
+            if (state.in_album_detail()) {
+                state.album_detail.half_page_up();
+            } else {
+                state.library_page.half_page_up();
+            }
+        }
+        return true;
+    case Command::Activate:
+        if (state.active_page == PageId::Library) {
+            if (state.in_album_detail()) {
+                state.album_detail.play_selected();
+            } else {
+                auto sel = state.library_page.selected_album_id();
+                if (sel.has_value()) {
+                    state.viewing_album = sel;
+                    state.album_detail.set_album(sel);
+                }
+            }
+        }
+        return true;
+    case Command::QueueAppend:
+        if (state.active_page == PageId::Library && state.in_album_detail()) {
+            state.album_detail.append_selected();
+        }
+        return true;
+    case Command::QueuePlayNext:
+        if (state.active_page == PageId::Library && state.in_album_detail()) {
+            state.album_detail.play_selected_next();
         }
         return true;
     case Command::SubmitInput: {
@@ -231,7 +295,15 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
         return true;
     }
     case Command::Cancel:
-        input.clear_transient();
+        if (input.mode() != Mode::Normal) {
+            input.clear_transient();
+            return true;
+        }
+        // Normal-mode ESC pops a sub-view (album_detail -> grid).
+        if (state.in_album_detail()) {
+            state.viewing_album = std::nullopt;
+            state.album_detail.set_album(std::nullopt);
+        }
         return true;
     default:
         return true;
@@ -247,7 +319,7 @@ int run(engine::Engine* engine, library::Library* library) {
     }
 
     InputMap input;
-    AppState state(library);
+    AppState state(library, engine);
     render_frame(nc, engine, input, state);
 
     for (;;) {

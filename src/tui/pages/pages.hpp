@@ -19,8 +19,9 @@ void draw_pipeline(struct ncplane* host, int body_y0, int body_rows);
 void draw_settings(struct ncplane* host, int body_y0, int body_rows);
 
 // Status hint strip — one line above the player bar showing keys relevant
-// to the active page.
-std::string_view hint_for(int page_id);
+// to the active page. `subview` is non-zero for sub-pages within the page
+// (currently: 1 = album detail when active_page == Library).
+std::string_view hint_for(int page_id, int subview = 0);
 
 } // namespace transporter::tui::pages
 

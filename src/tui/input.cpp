@@ -63,6 +63,14 @@ CommandResult InputMap::handle_normal(const ncinput& ni) {
         return r;
     }
 
+    // ESC / Backspace pops a sub-view (e.g. AlbumDetail -> Library grid).
+    if (id == NCKEY_ESC || id == NCKEY_BACKSPACE) {
+        r.cmd = Command::Cancel;
+        pending_g_ = false;
+        pending_count_ = 0;
+        return r;
+    }
+
     // Page-number switches. '1'-'5' goto, but only when no count is being
     // built (i.e. first digit, and 6-9 / 0 are treated as count digits).
     if (id >= '1' && id <= '5' && pending_count_ == 0) {
@@ -149,6 +157,14 @@ CommandResult InputMap::handle_normal(const ncinput& ni) {
     case NCKEY_ENTER:
         r.cmd = Command::Activate;
         pending_g_ = false;
+        return r;
+    case 'a':
+        r.cmd = Command::QueueAppend;
+        consume_count();
+        return r;
+    case 'A':
+        r.cmd = Command::QueuePlayNext;
+        consume_count();
         return r;
     case 'q':
     case 'Q':

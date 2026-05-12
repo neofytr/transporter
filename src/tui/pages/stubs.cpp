@@ -64,9 +64,12 @@ void draw_settings(struct ncplane* host, int body_y0, int body_rows) {
               "Tabbed runtime knobs — coming in T8");
 }
 
-std::string_view hint_for(int page_id) {
+std::string_view hint_for(int page_id, int subview) {
+    if (page_id == 1 && subview == 1) {
+        return "j/k navigate · Enter play · a append · A play-next · Esc back";
+    }
     switch (page_id) {
-    case 1: return "j/k navigate · Enter play · / search · D dac · ? help";
+    case 1: return "hjkl navigate · Enter open album · / search · D dac · ? help";
     case 2: return "J/K reorder · dd remove · D clear · ? help";
     case 3: return "space play/pause · h/l seek · n next · ? help";
     case 4: return "? help";
