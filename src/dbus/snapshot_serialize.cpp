@@ -249,8 +249,8 @@ snapshot_to_dict(const transporter::engine::PipelineSnapshot& snap) {
                   sdbus::Variant{snap.bit_perfect.rt_enabled});
         m.emplace("no_recent_xrun",
                   sdbus::Variant{snap.bit_perfect.no_recent_xrun});
-        m.emplace("volume_unity",
-                  sdbus::Variant{snap.bit_perfect.volume_unity});
+        m.emplace("digital_path_off",
+                  sdbus::Variant{snap.bit_perfect.digital_path_off});
         m.emplace("no_mismatch_in_flight",
                   sdbus::Variant{snap.bit_perfect.no_mismatch_in_flight});
         m.emplace("qualifications",

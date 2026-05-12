@@ -77,7 +77,7 @@
 //       "no_resampling_in_flight": b
 //       "rt_enabled":              b
 //       "no_recent_xrun":          b
-//       "volume_unity":            b
+//       "digital_path_off":        b
 //       "no_mismatch_in_flight":   b
 //       "qualifications":          as
 //   }

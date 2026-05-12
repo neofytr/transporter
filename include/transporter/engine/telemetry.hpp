@@ -94,7 +94,10 @@ struct BitPerfectVerdict {
     bool no_resampling_in_flight = false;
     bool rt_enabled = false;
     bool no_recent_xrun = false;
-    bool volume_unity = false;
+    // True when the digital-volume scale stage is NOT engaged. HW volume is
+    // analog / DAC-internal and does not break bit-perfect; only the digital
+    // scale path does, and the spec's UI toggle disables it entirely.
+    bool digital_path_off = true;
     bool no_mismatch_in_flight = false;
     std::vector<std::string> qualifications;  // human-readable per-condition reasons
 };

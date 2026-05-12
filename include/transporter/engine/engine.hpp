@@ -136,6 +136,19 @@ public:
     State state() const noexcept;
     PcmFormat current_format() const noexcept;
 
+    // Digital-volume state. Independent of HW volume: HW volume is applied
+    // analog or inside the DAC and leaves the digital boundary untouched;
+    // a digital scale stage in the engine multiplies samples before they
+    // reach ALSA and therefore breaks bit-perfect. The spec's "UI toggle
+    // disables digital path entirely" lands here: when the digital path
+    // is engaged the bit-perfect verdict drops out of YES.
+    //
+    // This build never instantiates the digital scale stage; the field
+    // exists so the verdict is correct the moment the GUI wires a UI
+    // toggle through.
+    void set_digital_volume_active(bool active) noexcept;
+    bool digital_volume_active() const noexcept;
+
     // Snapshot the full pipeline for the GUI / telemetry dump. Safe to call
     // from any non-RT thread at >= 10 Hz. Holds engine-side mutexes only
     // briefly (decoder pointer + current hw string); the audio path is

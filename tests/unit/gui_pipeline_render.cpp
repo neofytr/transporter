@@ -115,7 +115,7 @@ te::PipelineSnapshot make_snapshot() {
     s.bit_perfect.no_resampling_in_flight = true;
     s.bit_perfect.rt_enabled = true;
     s.bit_perfect.no_recent_xrun = true;
-    s.bit_perfect.volume_unity = true;
+    s.bit_perfect.digital_path_off = true;
     s.bit_perfect.no_mismatch_in_flight = true;
     return s;
 }

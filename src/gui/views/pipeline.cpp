@@ -404,7 +404,7 @@ void verdict_card(const PipelineSnapshot& s) {
     kv_bool("no resampling in flight",  s.bit_perfect.no_resampling_in_flight);
     kv_bool("RT enabled",               s.bit_perfect.rt_enabled);
     kv_bool("no recent xrun",           s.bit_perfect.no_recent_xrun);
-    kv_bool("volume at unity",          s.bit_perfect.volume_unity);
+    kv_bool("digital path off",         s.bit_perfect.digital_path_off);
     kv_bool("no mismatch in flight",    s.bit_perfect.no_mismatch_in_flight);
 
     if (!s.bit_perfect.qualifications.empty()) {

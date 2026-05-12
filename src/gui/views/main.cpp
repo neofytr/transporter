@@ -162,8 +162,8 @@ void verdict_badge(const engine::PipelineSnapshot& s) {
                     s.bit_perfect.rt_enabled ? "yes" : "no");
         ImGui::Text("no recent xrun: %s",
                     s.bit_perfect.no_recent_xrun ? "yes" : "no");
-        ImGui::Text("volume at unity: %s",
-                    s.bit_perfect.volume_unity ? "yes" : "no");
+        ImGui::Text("digital path off: %s",
+                    s.bit_perfect.digital_path_off ? "yes" : "no");
         ImGui::Text("no mismatch in flight: %s",
                     s.bit_perfect.no_mismatch_in_flight ? "yes" : "no");
         for (const auto& q : s.bit_perfect.qualifications) {

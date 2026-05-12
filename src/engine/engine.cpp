@@ -100,6 +100,10 @@ struct Engine::Impl {
     std::atomic<std::size_t> ring_max_watermark{0};   // session-wide max producer fill
     std::atomic<bool> mismatch_in_flight{false};
     std::atomic<std::uint64_t> last_xrun_ns{0};
+    // Digital-volume engagement. GUI flips this through the engine API
+    // when the user enables the digital path; bit-perfect verdict drops
+    // out of YES while it is true. Default false: no scale stage active.
+    std::atomic<bool> digital_volume_active_{false};
 
     // Decoder thread state (atomically tagged for the snapshot's "thread_state").
     enum class DecodeState : std::uint8_t {
@@ -1450,6 +1454,14 @@ PcmFormat Engine::current_format() const noexcept {
     return impl_->current_format_;
 }
 
+void Engine::set_digital_volume_active(bool active) noexcept {
+    impl_->digital_volume_active_.store(active, std::memory_order_relaxed);
+}
+
+bool Engine::digital_volume_active() const noexcept {
+    return impl_->digital_volume_active_.load(std::memory_order_relaxed);
+}
+
 void Engine::set_event_callback(EventCallback cb) {
     std::lock_guard lk(impl_->cb_mtx);
     impl_->cb = std::move(cb);
@@ -1574,7 +1586,12 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
         s.format_match.declared.sample_format ==
             s.format_match.matched.sample_format &&
         s.format_match.declared.channels == s.format_match.matched.channels;
-    v.digital_path_bitperfect = v.no_resampling_in_flight; // no DSP/resample/dither in this build
+    v.digital_path_off =
+        !impl_->digital_volume_active_.load(std::memory_order_relaxed);
+    // Digital path is bit-perfect only when there's no resampling AND the
+    // digital-volume scale stage is disengaged. HW volume rides through
+    // analog / DAC-internal stages and does not enter this predicate.
+    v.digital_path_bitperfect = v.no_resampling_in_flight && v.digital_path_off;
     v.rt_enabled = s.realtime.status.mode == rt::Mode::Fifo;
     v.no_mismatch_in_flight =
         !impl_->mismatch_in_flight.load(std::memory_order_relaxed);
@@ -1582,9 +1599,6 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
     const std::uint64_t now = trace::monotonic_ns_now();
     const std::uint64_t last_xrun = impl_->last_xrun_ns.load(std::memory_order_relaxed);
     v.no_recent_xrun = (last_xrun == 0) || (now - last_xrun > XRUN_WINDOW_NS);
-    // Volume: this build does not (yet) drive HW volume. Treat as unity until
-    // the volume module lands; the spec's "digital path off" branch holds.
-    v.volume_unity = true;
 
     using L = BitPerfectVerdict::Level;
     const bool disconnected = !s.device.is_connected;
@@ -1593,7 +1607,7 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
         v.qualifications.push_back("DAC currently disconnected");
     } else if (!v.digital_path_bitperfect || !v.no_mismatch_in_flight) {
         v.level = L::No;
-    } else if (v.rt_enabled && v.no_recent_xrun && v.volume_unity) {
+    } else if (v.rt_enabled && v.no_recent_xrun) {
         v.level = L::Yes;
     } else {
         v.level = L::Qualified;
@@ -1605,7 +1619,7 @@ PipelineSnapshot Engine::pipeline_snapshot() const {
     if (!v.no_recent_xrun) {
         v.qualifications.push_back("xrun within last 5 s");
     }
-    if (!v.volume_unity) {
+    if (!v.digital_path_off) {
         v.qualifications.push_back("digital volume engaged");
     }
     if (!v.no_mismatch_in_flight) {
