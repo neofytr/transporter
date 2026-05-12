@@ -192,3 +192,10 @@ test_tui_notcurses_ctx = executable(
 )
 test('tui_notcurses_ctx', test_tui_notcurses_ctx)
 
+test_tui_player_bar = executable(
+  'test_tui_player_bar',
+  'tui_player_bar.cpp',
+  dependencies : [tui_dep, doctest_dep, engine_dep],
+)
+test('tui_player_bar', test_tui_player_bar)
+
