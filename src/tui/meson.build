@@ -1,4 +1,6 @@
 notcurses_dep = dependency('notcurses', required : true)
+jpeg_dep      = dependency('libjpeg',   required : true)
+png_dep       = dependency('libpng',    required : true)
 
 # notcurses may be installed in a non-standard prefix (e.g. ~/.local when the
 # user built from source). Pull its libdir from pkg-config and embed it as
@@ -20,14 +22,16 @@ tui_lib = static_library(
   'app.cpp',
   'input.cpp',
   'components/player_bar.cpp',
+  'components/cover.cpp',
   'pages/stubs.cpp',
   include_directories : [inc_public, include_directories('..')],
-  dependencies : [engine_dep, library_dep, config_dep, notcurses_dep],
+  dependencies : [engine_dep, library_dep, config_dep,
+                  notcurses_dep, jpeg_dep, png_dep],
 )
 
 tui_dep = declare_dependency(
   link_with : tui_lib,
   include_directories : [include_directories('.')],
-  dependencies : [notcurses_dep],
+  dependencies : [notcurses_dep, jpeg_dep, png_dep],
   link_args : notcurses_rpath,
 )
