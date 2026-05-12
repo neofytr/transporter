@@ -52,6 +52,11 @@ public:
     bool append_selected();
     bool play_selected_next();
 
+    // Track-list accessors used by the App layer to populate the
+    // not-yet-real queue and switch to NowPlaying after a play action.
+    const std::vector<library::Track>& tracks() const noexcept { return tracks_; }
+    std::size_t selected_index() const noexcept { return selected_; }
+
 private:
     library::Library* lib_ = nullptr;
     engine::Engine*   eng_ = nullptr;

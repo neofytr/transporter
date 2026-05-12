@@ -22,6 +22,7 @@
 #include <cstring>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace transporter::tui {
 
@@ -36,6 +37,11 @@ struct AppState {
     pages::NowPlayingPage now_playing;
     std::optional<std::int64_t> viewing_album;
 
+    // queue stub at app level (becomes real in T4). For T3 the queue is just
+    // the tracks of the album that produced the most recent play action.
+    std::vector<library::Track> queue;
+    std::size_t                 queue_idx = 0;
+
     AppState(library::Library* lib, engine::Engine* eng)
         : library_page(lib), album_detail(lib, eng), now_playing(eng) {}
 
@@ -43,6 +49,24 @@ struct AppState {
         return viewing_album.has_value();
     }
 };
+
+// Start playback of the track at queue[idx]. Updates queue_idx on success
+// but leaves the queue untouched. Returns true on success.
+bool play_at(engine::Engine* engine, AppState& state, std::size_t idx) {
+    if (engine == nullptr || idx >= state.queue.size()) {
+        return false;
+    }
+    auto lr = engine->load(state.queue[idx].path);
+    if (!lr.has_value()) {
+        return false;
+    }
+    auto pr = engine->play();
+    if (!pr.has_value()) {
+        return false;
+    }
+    state.queue_idx = idx;
+    return true;
+}
 
 void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows,
                const engine::PipelineSnapshot* snap) {
@@ -291,6 +315,17 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
     case Command::QueuePlayNext:
         if (state.active_page == PageId::Library && state.in_album_detail()) {
             state.album_detail.play_selected_next();
+        }
+        return true;
+    case Command::NextTrack:
+        if (engine != nullptr && !state.queue.empty()
+            && state.queue_idx + 1 < state.queue.size()) {
+            (void)play_at(engine, state, state.queue_idx + 1);
+        }
+        return true;
+    case Command::PrevTrack:
+        if (engine != nullptr && !state.queue.empty() && state.queue_idx > 0) {
+            (void)play_at(engine, state, state.queue_idx - 1);
         }
         return true;
     case Command::SubmitInput: {

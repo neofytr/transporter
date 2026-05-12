@@ -166,6 +166,15 @@ CommandResult InputMap::handle_normal(const ncinput& ni) {
         r.cmd = Command::QueuePlayNext;
         consume_count();
         return r;
+    case 'n':
+        r.cmd = Command::NextTrack;
+        consume_count();
+        return r;
+    case ',':
+    case '<':
+        r.cmd = Command::PrevTrack;
+        consume_count();
+        return r;
     case 'q':
     case 'Q':
         r.cmd = Command::Quit;

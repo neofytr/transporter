@@ -43,6 +43,8 @@ enum class Command : std::uint8_t {
     MouseClick,
     QueueAppend,        // 'a' — append selected to queue
     QueuePlayNext,      // 'A' — play selected next (after current)
+    NextTrack,          // 'n' — next track in queue
+    PrevTrack,          // ',' / '<' — prev track in queue
 };
 
 struct CommandResult {
