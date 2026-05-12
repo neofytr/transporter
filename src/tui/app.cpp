@@ -10,6 +10,7 @@
 #include "pages/library.hpp"
 #include "pages/now_playing.hpp"
 #include "pages/pages.hpp"
+#include "pages/queue.hpp"
 
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/telemetry.hpp>
@@ -39,10 +40,11 @@ struct AppState {
     pages::LibraryPage library_page;
     pages::AlbumDetailPage album_detail;
     pages::NowPlayingPage now_playing;
+    pages::QueuePage queue_page;
     std::optional<std::int64_t> viewing_album;
 
-    // queue stub at app level (becomes real in T4). For T3 the queue is just
-    // the tracks of the album that produced the most recent play action.
+    // App-level queue. The Library/AlbumDetail layer replaces it on Enter;
+    // the Queue page (T4) supports in-place reorder / remove / clear.
     std::vector<library::Track> queue;
     std::size_t                 queue_idx = 0;
 
@@ -96,7 +98,8 @@ void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows,
         }
         break;
     case PageId::Queue:
-        pages::draw_queue(p, body_y0, body_rows);
+        state.queue_page.draw(p, body_y0, body_rows,
+                              state.queue, state.queue_idx);
         break;
     case PageId::NowPlaying:
         state.now_playing.draw(p, body_y0, body_rows, snap);
@@ -296,6 +299,8 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             } else {
                 state.library_page.move_up(cr.count);
             }
+        } else if (state.active_page == PageId::Queue) {
+            state.queue_page.move_up(cr.count, state.queue.size());
         }
         return true;
     case Command::MoveDown:
@@ -305,6 +310,8 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             } else {
                 state.library_page.move_down(cr.count);
             }
+        } else if (state.active_page == PageId::Queue) {
+            state.queue_page.move_down(cr.count, state.queue.size());
         }
         return true;
     case Command::GotoTop:
@@ -314,6 +321,8 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             } else {
                 state.library_page.goto_top();
             }
+        } else if (state.active_page == PageId::Queue) {
+            state.queue_page.goto_top(state.queue.size());
         }
         return true;
     case Command::GotoBottom:
@@ -323,6 +332,8 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             } else {
                 state.library_page.goto_bottom();
             }
+        } else if (state.active_page == PageId::Queue) {
+            state.queue_page.goto_bottom(state.queue.size());
         }
         return true;
     case Command::ScrollDown:
@@ -332,6 +343,8 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             } else {
                 state.library_page.half_page_down();
             }
+        } else if (state.active_page == PageId::Queue) {
+            state.queue_page.half_page_down(state.queue.size());
         }
         return true;
     case Command::ScrollUp:
@@ -341,6 +354,8 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             } else {
                 state.library_page.half_page_up();
             }
+        } else if (state.active_page == PageId::Queue) {
+            state.queue_page.half_page_up(state.queue.size());
         }
         return true;
     case Command::Activate:
@@ -365,6 +380,11 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
                     state.viewing_album = sel;
                     state.album_detail.set_album(sel);
                 }
+            }
+        } else if (state.active_page == PageId::Queue) {
+            const std::size_t idx = state.queue_page.selected();
+            if (idx < state.queue.size() && engine != nullptr) {
+                (void)play_at(engine, state, idx);
             }
         }
         return true;
@@ -395,6 +415,13 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             // Mouse y/x is screen-absolute; NowPlaying drew into the body
             // starting at row 0, so the coordinates already match.
             (void)state.now_playing.handle_mouse(cr.y, cr.x, &s);
+        } else if (state.active_page == PageId::Queue
+                   && !state.queue.empty()) {
+            // Translate the row click to a track index; clicking selects.
+            const std::size_t hit = state.queue_page.hit_row(cr.y);
+            if (hit < state.queue.size()) {
+                state.queue_page.set_selected(hit);
+            }
         }
         return true;
     case Command::SubmitInput: {

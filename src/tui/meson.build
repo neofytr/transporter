@@ -31,6 +31,7 @@ tui_lib = static_library(
   'pages/library.cpp',
   'pages/album_detail.cpp',
   'pages/now_playing.cpp',
+  'pages/queue.cpp',
   'pages/stubs.cpp',
   include_directories : [inc_public, include_directories('..')],
   dependencies : [engine_dep, library_dep, config_dep,

@@ -36,13 +36,6 @@ void draw_stub(struct ncplane* host, int y0, int rows,
 
 } // namespace
 
-void draw_queue(struct ncplane* host, int body_y0, int body_rows) {
-    draw_stub(host, body_y0, body_rows,
-              "Queue",
-              "Queue",
-              "Up next — coming in T4");
-}
-
 void draw_pipeline(struct ncplane* host, int body_y0, int body_rows) {
     draw_stub(host, body_y0, body_rows,
               "Pipeline",
@@ -63,7 +56,7 @@ std::string_view hint_for(int page_id, int subview) {
     }
     switch (page_id) {
     case 1: return "hjkl navigate · Enter open album · / search · D dac · ? help";
-    case 2: return "J/K reorder · dd remove · D clear · ? help";
+    case 2: return "j/k navigate · Enter play · ? help";
     case 3: return "space play/pause · h/l ±5s · n next · , prev · ? help";
     case 4: return "? help";
     case 5: return "Tab tabs · ? help";
