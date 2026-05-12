@@ -8,13 +8,16 @@
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 
+#include <fontconfig/fontconfig.h>
 #include <poll.h>
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 namespace transporter::gui::platform {
 
@@ -28,6 +31,63 @@ const char* init_error_message(InitError e) noexcept {
     }
     return "unknown init error";
 }
+
+namespace {
+
+// Resolve a family name to an on-disk font file via fontconfig.
+// Returns an empty string when the match misses or yields a missing file
+// (fontconfig can return bitmap aliases that don't exist on disk).
+std::string fc_lookup(const char* family) {
+    std::string out;
+    FcPattern* pat = FcPatternBuild(nullptr,
+                                    FC_FAMILY,  FcTypeString, family,
+                                    FC_OUTLINE, FcTypeBool,   FcTrue,
+                                    nullptr);
+    if (!pat) return out;
+    FcConfigSubstitute(nullptr, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+
+    FcResult res = FcResultNoMatch;
+    FcPattern* match = FcFontMatch(nullptr, pat, &res);
+    if (match && res == FcResultMatch) {
+        FcChar8* file = nullptr;
+        if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch
+            && file) {
+            const char* path = reinterpret_cast<const char*>(file);
+            if (std::filesystem::exists(path)) {
+                out = path;
+            }
+        }
+    }
+    if (match) FcPatternDestroy(match);
+    FcPatternDestroy(pat);
+    return out;
+}
+
+// Resolve the UI font path. Preference order favours the Nerd Font variants
+// because the player draws media-control glyphs from the icon range; falls
+// back to monospace so plain text still renders if no Nerd Font is installed.
+// If fontconfig returns nothing useful, the caller falls back to ImGui's
+// built-in font and the icon glyphs render as boxes.
+// Note: a freshly dropped font in ~/.local/share/fonts may need
+// `fc-cache -fv ~/.local/share/fonts` before fontconfig can see it.
+std::string resolve_ui_font() {
+    if (!FcInit()) return {};
+    static const char* const kFamilies[] = {
+        "JetBrains Mono Nerd Font",
+        "JetBrainsMono Nerd Font",
+        "Nerd Font Mono",
+        "Nerd Font",
+        "monospace",
+    };
+    for (const char* fam : kFamilies) {
+        std::string path = fc_lookup(fam);
+        if (!path.empty()) return path;
+    }
+    return {};
+}
+
+}  // namespace
 
 Window::Window() : impl_(std::make_unique<WindowImpl>()) {}
 
@@ -101,9 +161,7 @@ Window::create(const WindowConfig& cfg) {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
 
-    constexpr const char* kFont =
-        "/home/raj/.local/share/fonts/JetBrainsMono/"
-        "JetBrainsMonoNerdFont-Regular.ttf";
+    const std::string font_path = resolve_ui_font();
     // Glyph ranges: Basic Latin, Latin-1, the Miscellaneous Technical block
     // (media controls U+2300..U+23FF), General Punctuation (em-dash, middle
     // dot), the Geometric Shapes range that holds the play triangle (U+25B6)
@@ -119,14 +177,17 @@ Window::create(const WindowConfig& cfg) {
         0x2700, 0x27BF,  // Dingbats
         0,
     };
-    if (std::filesystem::exists(kFont)) {
-        io.Fonts->AddFontFromFileTTF(kFont, 17.0f, nullptr, kGlyphRanges);
-        s.font_title = io.Fonts->AddFontFromFileTTF(kFont, 28.0f, nullptr, kGlyphRanges);
-        s.font_h2    = io.Fonts->AddFontFromFileTTF(kFont, 18.0f, nullptr, kGlyphRanges);
-        s.font_body  = io.Fonts->AddFontFromFileTTF(kFont, 14.0f, nullptr, kGlyphRanges);
-        s.font_small = io.Fonts->AddFontFromFileTTF(kFont, 12.0f, nullptr, kGlyphRanges);
-        s.font_icon  = io.Fonts->AddFontFromFileTTF(kFont, 32.0f, nullptr, kGlyphRanges);
+    if (!font_path.empty()) {
+        std::fprintf(stderr, "transporter: using font %s\n", font_path.c_str());
+        const char* f = font_path.c_str();
+        io.Fonts->AddFontFromFileTTF(f, 17.0f, nullptr, kGlyphRanges);
+        s.font_title = io.Fonts->AddFontFromFileTTF(f, 28.0f, nullptr, kGlyphRanges);
+        s.font_h2    = io.Fonts->AddFontFromFileTTF(f, 18.0f, nullptr, kGlyphRanges);
+        s.font_body  = io.Fonts->AddFontFromFileTTF(f, 14.0f, nullptr, kGlyphRanges);
+        s.font_small = io.Fonts->AddFontFromFileTTF(f, 12.0f, nullptr, kGlyphRanges);
+        s.font_icon  = io.Fonts->AddFontFromFileTTF(f, 32.0f, nullptr, kGlyphRanges);
     } else {
+        std::fprintf(stderr, "transporter: using ImGui default font (no Nerd Font available)\n");
         ImFontConfig fcfg;
         fcfg.SizePixels = 15.0f;
         io.Fonts->AddFontDefault(&fcfg);

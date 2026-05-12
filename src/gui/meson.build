@@ -2,6 +2,7 @@ wayland_client_dep  = dependency('wayland-client')
 xkbcommon_dep       = dependency('xkbcommon')
 libpng_dep          = dependency('libpng')
 libjpeg_dep         = dependency('libjpeg')
+fontconfig_dep      = dependency('fontconfig')
 
 egl_dep         = dependency('egl',         required: false)
 wayland_egl_dep = dependency('wayland-egl', required: false)
@@ -80,6 +81,7 @@ gui_lib = static_library(
     xkbcommon_dep,
     libpng_dep,
     libjpeg_dep,
+    fontconfig_dep,
   ] + gl_deps,
   cpp_args : ['-Wno-old-style-cast'] + gl_cpp_args,
 )
@@ -98,5 +100,6 @@ gui_dep = declare_dependency(
     xkbcommon_dep,
     libpng_dep,
     libjpeg_dep,
+    fontconfig_dep,
   ] + gl_deps,
 )
