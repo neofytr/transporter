@@ -146,12 +146,6 @@ public:
     // enough for grep / awk; not a binary protocol.
     void dump_trace(std::ostream& os) const;
 
-    // Returns pointer to the spectrum sample ring. Carries float32 mono
-    // (channel-0 only) samples at the native playback rate. GUI thread owns
-    // the consumer side; audio thread is the producer. Null when no track
-    // is loaded.
-    SpscByteRing* spectrum_ring() noexcept;
-
     // Single-listener. Caller-side fan-out is the consumer's job.
     void set_event_callback(EventCallback cb);
 
