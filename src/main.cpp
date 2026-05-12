@@ -41,14 +41,23 @@ void print_help() {
         "\n"
         "Options:\n"
         "  --daemon            Force daemon mode (no TUI, MPRIS only)\n"
-        "  --no-mouse          Disable mouse handling in the TUI (T1+)\n"
+        "  --no-mouse          Disable mouse handling in the TUI\n"
         "  --config PATH       Override config file path\n"
         "  --library-db PATH   Override library SQLite path\n"
         "  --probe-terminal    Print terminal capability matrix and exit\n"
         "  --version, -V       Print version and exit\n"
         "  --help, -h          Print this help and exit\n"
         "\n"
-        "Positional FILE is loaded and played at launch.\n",
+        "Positional FILE is loaded and played at launch.\n"
+        "\n"
+        "Keys (TUI):\n"
+        "  1..5            Switch to page (Library/Queue/NowPlaying/Pipeline/Settings)\n"
+        "  Tab / S-Tab     Cycle pages\n"
+        "  h j k l         Move (arrows also work)\n"
+        "  gg / G          Top / bottom; prefix with count, e.g. 5j\n"
+        "  space           Play / pause\n"
+        "  / : ?           Search / command palette / help overlay\n"
+        "  q : q  Ctrl-C   Quit\n",
         stdout);
 }
 
