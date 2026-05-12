@@ -199,3 +199,10 @@ test_tui_player_bar = executable(
 )
 test('tui_player_bar', test_tui_player_bar)
 
+test_tui_cover = executable(
+  'test_tui_cover',
+  'tui_cover.cpp',
+  dependencies : [tui_dep, doctest_dep, png_dep],
+)
+test('tui_cover', test_tui_cover)
+
