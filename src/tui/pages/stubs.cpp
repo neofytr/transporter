@@ -64,7 +64,7 @@ std::string_view hint_for(int page_id, int subview) {
     switch (page_id) {
     case 1: return "hjkl navigate · Enter open album · / search · D dac · ? help";
     case 2: return "J/K reorder · dd remove · D clear · ? help";
-    case 3: return "space play/pause · h/l seek · n next · ? help";
+    case 3: return "space play/pause · h/l ±5s · n next · , prev · ? help";
     case 4: return "? help";
     case 5: return "Tab tabs · ? help";
     default: return "";

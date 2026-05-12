@@ -3,6 +3,7 @@
 #include "app.hpp"
 
 #include "components/player_bar.hpp"
+#include "components/toast.hpp"
 #include "input.hpp"
 #include "notcurses_ctx.hpp"
 #include "pages/album_detail.hpp"
@@ -17,10 +18,12 @@
 #include <notcurses/notcurses.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -29,6 +32,7 @@ namespace transporter::tui {
 namespace {
 
 constexpr int kPageCount = 5;
+constexpr std::int64_t kSeekStepMs = 5000;
 
 struct AppState {
     PageId active_page = PageId::Library;
@@ -42,6 +46,10 @@ struct AppState {
     std::vector<library::Track> queue;
     std::size_t                 queue_idx = 0;
 
+    // Track-change detection drives the toast.
+    std::string                 last_source_path;
+    components::Toast           toast;
+
     AppState(library::Library* lib, engine::Engine* eng)
         : library_page(lib), album_detail(lib, eng), now_playing(eng) {}
 
@@ -49,6 +57,15 @@ struct AppState {
         return viewing_album.has_value();
     }
 };
+
+// Pull a fresh snapshot for handlers that need engine state to compute their
+// effect (mouse hit-test on the seekbar, keyboard seek).
+engine::PipelineSnapshot current_snap(engine::Engine* engine) {
+    if (engine == nullptr) {
+        return {};
+    }
+    return engine->pipeline_snapshot();
+}
 
 // Start playback of the track at queue[idx]. Updates queue_idx on success
 // but leaves the queue untouched. Returns true on success.
@@ -165,6 +182,23 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
     const engine::PipelineSnapshot* snap_ptr =
         snap_opt.has_value() ? &snap_opt.value() : nullptr;
 
+    // Track-change detection drives the toast.
+    if (snap_ptr != nullptr) {
+        const std::string& src = snap_ptr->source.file_path;
+        if (!src.empty() && src != state.last_source_path) {
+            const auto& tags = snap_ptr->source.tags;
+            std::string title = tags.title.empty() ? src : tags.title;
+            std::string msg = "\xE2\x96\xB6 Now playing: " + title;
+            if (!tags.artist.empty()) {
+                msg += " \xE2\x80\x94 ";  // —
+                msg += tags.artist;
+            }
+            state.toast.trigger(std::move(msg),
+                                std::chrono::steady_clock::now());
+            state.last_source_path = src;
+        }
+    }
+
     const int body_rows = static_cast<int>(rows)
                         - components::kPlayerBarRows - kHintRows;
     if (body_rows > 0) {
@@ -179,6 +213,13 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
         draw_hint(std_plane, hint_y, static_cast<int>(cols),
                   pages::hint_for(static_cast<int>(state.active_page),
                                   subview));
+    }
+
+    // Toast paints inside the frame, on the row just above the bottom border.
+    const auto now = std::chrono::steady_clock::now();
+    if (state.toast.visible(now) && body_rows > 2) {
+        const int toast_y = body_rows - 2;
+        state.toast.draw(std_plane, toast_y, static_cast<int>(cols), now);
     }
 
     if (snap_ptr != nullptr) {
@@ -231,12 +272,20 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
         }
         return true;
     case Command::MoveLeft:
-        if (state.active_page == PageId::Library && !state.in_album_detail()) {
+        if (state.active_page == PageId::NowPlaying) {
+            const auto s = current_snap(engine);
+            state.now_playing.seek_relative(-kSeekStepMs, &s);
+        } else if (state.active_page == PageId::Library
+                   && !state.in_album_detail()) {
             state.library_page.move_left(cr.count);
         }
         return true;
     case Command::MoveRight:
-        if (state.active_page == PageId::Library && !state.in_album_detail()) {
+        if (state.active_page == PageId::NowPlaying) {
+            const auto s = current_snap(engine);
+            state.now_playing.seek_relative(kSeekStepMs, &s);
+        } else if (state.active_page == PageId::Library
+                   && !state.in_album_detail()) {
             state.library_page.move_right(cr.count);
         }
         return true;
@@ -297,7 +346,19 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
     case Command::Activate:
         if (state.active_page == PageId::Library) {
             if (state.in_album_detail()) {
-                state.album_detail.play_selected();
+                // Replace the queue with this album's tracks, play at the
+                // selected index, and jump to Now Playing.
+                const auto& tracks = state.album_detail.tracks();
+                const std::size_t idx = state.album_detail.selected_index();
+                if (!tracks.empty() && idx < tracks.size()
+                    && engine != nullptr) {
+                    state.queue = tracks;
+                    if (play_at(engine, state, idx)) {
+                        state.viewing_album = std::nullopt;
+                        state.album_detail.set_album(std::nullopt);
+                        state.active_page = PageId::NowPlaying;
+                    }
+                }
             } else {
                 auto sel = state.library_page.selected_album_id();
                 if (sel.has_value()) {
@@ -326,6 +387,14 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
     case Command::PrevTrack:
         if (engine != nullptr && !state.queue.empty() && state.queue_idx > 0) {
             (void)play_at(engine, state, state.queue_idx - 1);
+        }
+        return true;
+    case Command::MouseClick:
+        if (state.active_page == PageId::NowPlaying && engine != nullptr) {
+            const auto s = current_snap(engine);
+            // Mouse y/x is screen-absolute; NowPlaying drew into the body
+            // starting at row 0, so the coordinates already match.
+            (void)state.now_playing.handle_mouse(cr.y, cr.x, &s);
         }
         return true;
     case Command::SubmitInput: {
