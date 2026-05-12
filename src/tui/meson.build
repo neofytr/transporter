@@ -23,6 +23,7 @@ tui_lib = static_library(
   'input.cpp',
   'components/player_bar.cpp',
   'components/cover.cpp',
+  'components/cover_cache.cpp',
   'pages/stubs.cpp',
   include_directories : [inc_public, include_directories('..')],
   dependencies : [engine_dep, library_dep, config_dep,
