@@ -4,6 +4,8 @@
 
 #include <string>
 
+struct notcurses;
+
 namespace transporter::tui {
 
 struct Capabilities {
@@ -32,13 +34,11 @@ int init();
 // Tear down notcurses cleanly. Idempotent.
 void shutdown();
 
+// Return the live notcurses context, or nullptr if not yet initialised.
+struct notcurses* current_context();
+
 // Print a freshly-probed capability matrix to stdout, one line per field.
 void print_capabilities();
-
-// Run the TUI event loop. Currently a placeholder: shows an empty
-// notcurses plane with "transporter" centred, waits for 'q' or Ctrl-C.
-// Returns process exit code.
-int run();
 
 } // namespace transporter::tui
 

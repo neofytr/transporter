@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "tui/app.hpp"
 #include "tui/notcurses_ctx.hpp"
 
 #include <transporter/config/config.hpp>
@@ -284,7 +285,7 @@ int main(int argc, char** argv) {
                      "falling back to daemon mode\n");
         wait_for_termination_signal();
     } else {
-        transporter::tui::run();
+        transporter::tui::run(engine.get(), library.get());
         transporter::tui::shutdown();
     }
 
