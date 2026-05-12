@@ -165,13 +165,6 @@ test_config_toml = executable(
 )
 test('config_toml', test_config_toml)
 
-test_gui_pipeline_render = executable(
-  'test_gui_pipeline_render',
-  'gui_pipeline_render.cpp',
-  dependencies : [gui_dep, engine_dep, imgui_dep],
-)
-test('gui_pipeline_render', test_gui_pipeline_render)
-
 test_dbus_metadata = executable(
   'test_dbus_metadata',
   'dbus_metadata.cpp',
@@ -192,9 +185,3 @@ test_loopback_byte_compare = executable(
 )
 test('loopback_byte_compare', test_loopback_byte_compare)
 
-test_queue_ops = executable(
-  'test_queue_ops',
-  'queue_ops.cpp',
-  dependencies : [gui_dep, engine_dep, imgui_dep, doctest_dep],
-)
-test('queue_ops', test_queue_ops)

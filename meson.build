@@ -51,7 +51,6 @@ inc_public = include_directories('include')
 
 subdir('third_party/alac')
 subdir('third_party/doctest')
-subdir('third_party/imgui')
 subdir('third_party/tomlpp')
 subdir('src/engine')
 subdir('src/library')
@@ -59,20 +58,13 @@ subdir('src/theme')
 subdir('src/dbus')
 subdir('src/hotplug')
 subdir('src/config')
-subdir('src/gui')
 
 executable(
   'transporter',
   'src/main.cpp',
   include_directories : [inc_public, include_directories('src')],
-  dependencies : [gui_dep, engine_dep, library_dep, config_dep, dbus_dep],
-  link_with : [theme_lib],
+  dependencies : [engine_dep, library_dep, config_dep, dbus_dep],
   install : true,
-)
-
-install_data(
-  'data/transporter.desktop',
-  install_dir : get_option('datadir') / 'applications',
 )
 
 subdir('tests/unit')
