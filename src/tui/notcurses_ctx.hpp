@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#ifndef TRANSPORTER_TUI_NOTCURSES_CTX_HPP
+#define TRANSPORTER_TUI_NOTCURSES_CTX_HPP
+
+#include <string>
+
+namespace transporter::tui {
+
+struct Capabilities {
+    bool kitty_graphics = false;
+    bool sixel          = false;
+    bool truecolor      = false;
+    bool unicode        = true;   // notcurses minimum
+    bool inside_tmux    = false;
+    bool inside_screen  = false;
+    std::string term;             // $TERM
+    std::string term_program;     // $TERM_PROGRAM if set
+    int cells_cols  = 0;
+    int cells_rows  = 0;
+    int pixel_cols  = 0;          // if reported by terminal
+    int pixel_rows  = 0;
+};
+
+// Probe terminal capabilities WITHOUT taking over the terminal. Safe to call
+// before/instead of init(). Used by --probe-terminal. Always returns; on probe
+// failure the returned struct holds only the env-derived fields.
+Capabilities probe_capabilities();
+
+// Initialise notcurses, take over the terminal. Returns 0 on success.
+int init();
+
+// Tear down notcurses cleanly. Idempotent.
+void shutdown();
+
+// Print a freshly-probed capability matrix to stdout, one line per field.
+void print_capabilities();
+
+// Run the TUI event loop. Currently a placeholder: shows an empty
+// notcurses plane with "transporter" centred, waits for 'q' or Ctrl-C.
+// Returns process exit code.
+int run();
+
+} // namespace transporter::tui
+
+#endif

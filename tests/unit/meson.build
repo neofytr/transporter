@@ -185,3 +185,10 @@ test_loopback_byte_compare = executable(
 )
 test('loopback_byte_compare', test_loopback_byte_compare)
 
+test_tui_notcurses_ctx = executable(
+  'test_tui_notcurses_ctx',
+  'tui_notcurses_ctx.cpp',
+  dependencies : [tui_dep, doctest_dep],
+)
+test('tui_notcurses_ctx', test_tui_notcurses_ctx)
+
