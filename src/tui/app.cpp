@@ -62,6 +62,19 @@ struct AppState {
     PageId active_page = PageId::Library;
 };
 
+constexpr int kHintRows = 1;
+
+void draw_hint(struct ncplane* host, int y, int cols, std::string_view hint) {
+    ncplane_set_fg_rgb8(host, 0x70, 0x70, 0x70);
+    for (int x = 0; x < cols; ++x) {
+        ncplane_putchar_yx(host, y, x, ' ');
+    }
+    if (!hint.empty()) {
+        ncplane_putstr_yx(host, y, 1, hint.data());
+    }
+    ncplane_set_fg_default(host);
+}
+
 void render_frame(struct notcurses* nc, engine::Engine* engine,
                   const InputMap& input, const AppState& state) {
     struct ncplane* std_plane = notcurses_stdplane(nc);
@@ -70,9 +83,15 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
     ncplane_erase(std_plane);
 
     const int body_rows = static_cast<int>(rows)
-                        - components::kPlayerBarRows;
+                        - components::kPlayerBarRows - kHintRows;
     if (body_rows > 0) {
         draw_page(std_plane, state.active_page, 0, body_rows);
+    }
+    const int hint_y = static_cast<int>(rows)
+                     - components::kPlayerBarRows - kHintRows;
+    if (hint_y >= 0) {
+        draw_hint(std_plane, hint_y, static_cast<int>(cols),
+                  pages::hint_for(static_cast<int>(state.active_page)));
     }
 
     if (engine != nullptr) {
