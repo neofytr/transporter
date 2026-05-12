@@ -28,6 +28,13 @@ struct Capabilities {
 // failure the returned struct holds only the env-derived fields.
 Capabilities probe_capabilities();
 
+// Capabilities snapshotted from the live notcurses instance during init().
+// Prefer this from inside the running TUI — calling probe_capabilities()
+// concurrently with the live session spawns a parallel notcurses on /dev/tty
+// that races terminal queries with the live instance, producing flaky pixel-
+// support detection. Falls back to a fresh probe when init() has not run yet.
+Capabilities cached_capabilities();
+
 struct InitOptions {
     bool enable_mouse = true;
 };

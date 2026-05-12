@@ -347,7 +347,11 @@ ncvisual* visual_from_cover(const Cover& cov) {
 
 BlitChoice pick_blitter() {
     BlitChoice c;
-    const Capabilities caps = probe_capabilities();
+    // Use the cache populated by tui::init(). probe_capabilities() spawns a
+    // parallel notcurses instance which races terminal queries with the live
+    // TUI session — repeated calls during render produced flaky sixel/kitty
+    // detection and the halfblock fallback (pixelated covers).
+    const Capabilities caps = cached_capabilities();
     // tmux defeats kitty graphics without explicit passthrough; sixel works
     // through tmux when the outer terminal supports it.
     const bool prefer_pixel = (caps.sixel)
