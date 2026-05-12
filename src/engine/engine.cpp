@@ -1059,6 +1059,22 @@ struct Engine::Impl {
         return std::string{"in-house"};
     }
 
+    // Classify an Error::message produced by Output::write_all to detect
+    // device-gone semantics. The message format is "snd_pcm_writei: <strerr>";
+    // <strerr> comes from snd_strerror(errno_neg) which is stable across
+    // alsa-lib versions. We match on -ENODEV (typical for USB unplug too fast
+    // for udev), -ENXIO (kernel saw device leave mid-write), and -EIO (USB
+    // transfer aborted; common with a hot-yank). Anything else is treated as
+    // a real audio fault.
+    static bool error_indicates_device_gone_(const Error& e) noexcept {
+        if (e.code != ErrorCode::WriteFailed) {
+            return false;
+        }
+        const std::string& m = e.message;
+        return m.find("No such device") != std::string::npos ||
+               m.find("Input/output error") != std::string::npos;
+    }
+
     void check_run_finish_() {
         // Called periodically by the worker. If the audio thread has signaled
         // done or error, finalize the run.
@@ -1070,6 +1086,21 @@ struct Engine::Impl {
         if (audio_done.load(std::memory_order_acquire) ||
             audio_error.load(std::memory_order_acquire)) {
             const bool errored = audio_error.load(std::memory_order_acquire);
+            if (errored && active_fp_known &&
+                error_indicates_device_gone_(last_audio_error)) {
+                // Pure write-side disconnect: the kernel saw the device leave
+                // mid-write but no udev event has reached us yet (or the
+                // device is non-USB and udev won't fire). Take the hotplug
+                // path so reconnect resumes naturally. handle_device_removed_
+                // is idempotent against a follow-up udev DeviceRemoved.
+                // Clear audio_error / audio_done so the worker loop doesn't
+                // wake spinning on stale flags; Disconnected -> reconnect
+                // will re-arm them via handle_device_added_.
+                audio_error.store(false, std::memory_order_release);
+                audio_done.store(false, std::memory_order_release);
+                handle_device_removed_();
+                return;
+            }
             if (errored) {
                 emit_error_(last_audio_error);
             } else {
