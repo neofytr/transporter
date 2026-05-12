@@ -14,7 +14,6 @@ namespace transporter::tui::pages {
 // title in the body, and a one-line subtitle.
 
 void draw_queue(struct ncplane* host, int body_y0, int body_rows);
-void draw_now_playing(struct ncplane* host, int body_y0, int body_rows);
 void draw_pipeline(struct ncplane* host, int body_y0, int body_rows);
 void draw_settings(struct ncplane* host, int body_y0, int body_rows);
 

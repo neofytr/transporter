@@ -7,6 +7,7 @@
 #include "notcurses_ctx.hpp"
 #include "pages/album_detail.hpp"
 #include "pages/library.hpp"
+#include "pages/now_playing.hpp"
 #include "pages/pages.hpp"
 
 #include <transporter/engine/engine.hpp>
@@ -32,17 +33,19 @@ struct AppState {
     PageId active_page = PageId::Library;
     pages::LibraryPage library_page;
     pages::AlbumDetailPage album_detail;
+    pages::NowPlayingPage now_playing;
     std::optional<std::int64_t> viewing_album;
 
     AppState(library::Library* lib, engine::Engine* eng)
-        : library_page(lib), album_detail(lib, eng) {}
+        : library_page(lib), album_detail(lib, eng), now_playing(eng) {}
 
     bool in_album_detail() const noexcept {
         return viewing_album.has_value();
     }
 };
 
-void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows) {
+void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows,
+               const engine::PipelineSnapshot* snap) {
     switch (state.active_page) {
     case PageId::Library:
         if (state.in_album_detail()) {
@@ -55,7 +58,7 @@ void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows) {
         pages::draw_queue(p, body_y0, body_rows);
         break;
     case PageId::NowPlaying:
-        pages::draw_now_playing(p, body_y0, body_rows);
+        state.now_playing.draw(p, body_y0, body_rows, snap);
         break;
     case PageId::Pipeline:
         pages::draw_pipeline(p, body_y0, body_rows);
@@ -130,10 +133,18 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
         return;
     }
 
+    // Snapshot the engine once per frame; pass it to NowPlaying + player bar.
+    std::optional<engine::PipelineSnapshot> snap_opt;
+    if (engine != nullptr) {
+        snap_opt = engine->pipeline_snapshot();
+    }
+    const engine::PipelineSnapshot* snap_ptr =
+        snap_opt.has_value() ? &snap_opt.value() : nullptr;
+
     const int body_rows = static_cast<int>(rows)
                         - components::kPlayerBarRows - kHintRows;
     if (body_rows > 0) {
-        draw_page(std_plane, state, 0, body_rows);
+        draw_page(std_plane, state, 0, body_rows, snap_ptr);
     }
     const int hint_y = static_cast<int>(rows)
                      - components::kPlayerBarRows - kHintRows;
@@ -146,10 +157,9 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
                                   subview));
     }
 
-    if (engine != nullptr) {
-        const auto snap = engine->pipeline_snapshot();
+    if (snap_ptr != nullptr) {
         const bool playing = engine->state() == engine::State::Playing;
-        components::draw_player_bar(std_plane, &snap, /*volume_pct=*/65,
+        components::draw_player_bar(std_plane, snap_ptr, /*volume_pct=*/65,
                                     playing);
     } else {
         components::draw_player_bar(std_plane, nullptr, 0, false);

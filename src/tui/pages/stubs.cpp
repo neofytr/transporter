@@ -43,13 +43,6 @@ void draw_queue(struct ncplane* host, int body_y0, int body_rows) {
               "Up next — coming in T4");
 }
 
-void draw_now_playing(struct ncplane* host, int body_y0, int body_rows) {
-    draw_stub(host, body_y0, body_rows,
-              "Now Playing",
-              "Now Playing",
-              "Cover · spectrum · VU — coming in T3 / T6");
-}
-
 void draw_pipeline(struct ncplane* host, int body_y0, int body_rows) {
     draw_stub(host, body_y0, body_rows,
               "Pipeline",
