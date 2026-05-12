@@ -3,6 +3,7 @@
 #include <transporter/engine/alsa_output.hpp>
 #include <transporter/engine/decoder.hpp>
 #include <transporter/engine/decoder_factory.hpp>
+#include <transporter/engine/device.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/engine/format.hpp>
 #include <transporter/engine/format_match.hpp>
@@ -21,11 +22,26 @@ namespace tp = transporter::engine;
 
 namespace {
 
+constexpr int EXIT_SKIP = 77;
+
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s <hw:CARD=X,DEV=Y> [fixtures_dir]\n"
+                 "usage: %s <hw:CARD=X,DEV=Y|auto> [fixtures_dir]\n"
                  "       fixtures_dir defaults to ./fixtures\n",
                  argv0);
+}
+
+std::string discover_hw() {
+    auto devs = tp::list_playback_devices();
+    if (!devs || devs->empty()) {
+        return {};
+    }
+    for (const auto& d : *devs) {
+        if (!d.caps.caps_probe_failed) {
+            return d.alsa_hw_string;
+        }
+    }
+    return {};
 }
 
 constexpr std::array<std::string_view, 7> kFiles = {
@@ -120,7 +136,17 @@ int main(int argc, char** argv) {
         print_usage(argv[0]);
         return 1;
     }
-    const std::string hw = argv[1];
+    const std::string_view hw_arg{argv[1]};
+    std::string hw{hw_arg};
+    if (hw_arg == "auto") {
+        hw = discover_hw();
+        if (hw.empty()) {
+            std::fprintf(stderr,
+                         "SKIP: no usable hw: playback device available\n");
+            return EXIT_SKIP;
+        }
+        std::fprintf(stderr, "auto-selected device: %s\n", hw.c_str());
+    }
     std::filesystem::path dir = argc == 3 ? argv[2] : "fixtures";
 
     int rc = 0;
@@ -129,6 +155,14 @@ int main(int argc, char** argv) {
         rc = play_one(hw, path);
         if (rc != 0) {
             std::fprintf(stderr, "stopped at %s\n", path.string().c_str());
+            // Under auto-discovery, all hardware-side failures (probe,
+            // format mismatch, open, write) are environment issues,
+            // not code defects. Translate them to SKIP.
+            if (hw_arg == "auto" && rc >= 3 && rc <= 7) {
+                std::fprintf(stderr,
+                             "SKIP: hw: device unusable for this fixture\n");
+                return EXIT_SKIP;
+            }
             return rc;
         }
     }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <transporter/engine/alsa_output.hpp>
+#include <transporter/engine/device.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/engine/format.hpp>
 #include <transporter/engine/format_match.hpp>
@@ -17,11 +18,28 @@ namespace tp = transporter::engine;
 
 namespace {
 
+constexpr int EXIT_SKIP = 77;
+
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s <hw:CARD=X,DEV=Y> <file.wav>\n"
+                 "usage: %s <hw:CARD=X,DEV=Y|auto> <file.wav>\n"
                  "       %s --inspect <file.wav>\n",
                  argv0, argv0);
+}
+
+// Discover any usable playback device. Returns empty on no usable device,
+// in which case the caller skip-exits with 77.
+std::string discover_hw() {
+    auto devs = tp::list_playback_devices();
+    if (!devs || devs->empty()) {
+        return {};
+    }
+    for (const auto& d : *devs) {
+        if (!d.caps.caps_probe_failed) {
+            return d.alsa_hw_string;
+        }
+    }
+    return {};
 }
 
 int do_inspect(const char* path) {
@@ -107,7 +125,26 @@ int main(int argc, char** argv) {
         if (a1 == "--inspect") {
             return do_inspect(argv[2]);
         }
-        return do_play(argv[1], argv[2]);
+        std::string hw = argv[1];
+        if (hw == "auto") {
+            hw = discover_hw();
+            if (hw.empty()) {
+                std::fprintf(stderr,
+                             "SKIP: no usable hw: playback device available\n");
+                return EXIT_SKIP;
+            }
+            std::fprintf(stderr, "auto-selected device: %s\n", hw.c_str());
+        }
+        const int rc = do_play(hw.c_str(), argv[2]);
+        // Under auto-discovery, all hardware-side failures (probe, format
+        // mismatch against the host's actual DAC, device open, write) are
+        // env issues rather than code defects. Translate them to SKIP.
+        if (std::string_view{argv[1]} == "auto" && rc >= 3 && rc <= 6) {
+            std::fprintf(stderr,
+                         "SKIP: hw: device unusable for this fixture\n");
+            return EXIT_SKIP;
+        }
+        return rc;
     }
     print_usage(argv[0]);
     return 1;

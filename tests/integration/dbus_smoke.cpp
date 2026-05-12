@@ -45,17 +45,25 @@ std::string introspect(sdbus::IConnection& c, const std::string& path) {
 
 int main() {
     if (!session_bus_reachable()) {
-        std::puts("no session bus, skipping");
-        return 0;
+        std::puts("SKIP: no session bus reachable");
+        return 77;
     }
 
     auto svc_or = transporter::dbus_svc::DbusService::start(
         nullptr, nullptr, transporter::dbus_svc::Hooks{},
         transporter::dbus_svc::Config{});
     if (!svc_or) {
-        std::fprintf(stderr,
-                     "service start failed: %s\n",
-                     svc_or.error().message.c_str());
+        const std::string msg = svc_or.error().message;
+        // Another transporter (or earlier player) already owns the well-
+        // known name on this bus. Env collision, not a code defect.
+        if (msg.find("FileExists") != std::string::npos ||
+            msg.find("already owned") != std::string::npos ||
+            msg.find("Failed to request bus name") != std::string::npos) {
+            std::printf(
+                "SKIP: bus name already owned by another process\n");
+            return 77;
+        }
+        std::fprintf(stderr, "service start failed: %s\n", msg.c_str());
         return 1;
     }
 

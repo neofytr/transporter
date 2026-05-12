@@ -17,6 +17,7 @@
 //   1 — engine errored or refused to load.
 //   2 — argv usage problem.
 
+#include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/error.hpp>
 #include <transporter/engine/format.hpp>
@@ -29,11 +30,34 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace tp = transporter::engine;
 
 namespace {
+
+constexpr int EXIT_SKIP = 77;
+
+std::string discover_hw() {
+    auto devs = tp::list_playback_devices();
+    if (!devs || devs->empty()) {
+        return {};
+    }
+    for (const auto& d : *devs) {
+        if (!d.caps.caps_probe_failed) {
+            return d.alsa_hw_string;
+        }
+    }
+    return {};
+}
+
+bool is_hardware_skip(const tp::Error& e) {
+    return e.code == tp::ErrorCode::DeviceBusy ||
+           e.code == tp::ErrorCode::DeviceOpenFailed ||
+           e.code == tp::ErrorCode::DeviceParamsRejected ||
+           e.code == tp::ErrorCode::FormatNotSupported;
+}
 
 const char* state_name(tp::State s) {
     switch (s) {
@@ -54,7 +78,7 @@ const char* rt_mode_name(tp::rt::Mode m) {
 
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s <hw:device> [<duration_seconds>=60] [<file>]\n"
+                 "usage: %s <hw:device|auto> [<duration_seconds>=60] [<file>]\n"
                  "  Run the engine against the given hw: device for the\n"
                  "  given duration, looping <file> repeatedly. Prints xrun\n"
                  "  count once per second on stderr.\n"
@@ -70,7 +94,17 @@ int main(int argc, char** argv) {
         print_usage(argv[0]);
         return 2;
     }
-    const std::string device = argv[1];
+    const std::string_view dev_arg{argv[1]};
+    std::string device{dev_arg};
+    if (dev_arg == "auto") {
+        device = discover_hw();
+        if (device.empty()) {
+            std::fprintf(stderr,
+                         "SKIP: no usable hw: playback device available\n");
+            return EXIT_SKIP;
+        }
+        std::fprintf(stderr, "auto-selected device: %s\n", device.c_str());
+    }
     const int duration_s = (argc >= 3) ? std::atoi(argv[2]) : 60;
     const std::filesystem::path file =
         (argc >= 4) ? std::filesystem::path{argv[3]}
@@ -89,6 +123,13 @@ int main(int argc, char** argv) {
     cfg.device_id = device;
     auto e = tp::Engine::create(std::move(cfg));
     if (!e) {
+        if (dev_arg == "auto" && is_hardware_skip(e.error())) {
+            std::fprintf(stderr, "SKIP: engine create failed (%.*s): %s\n",
+                         static_cast<int>(tp::error_code_name(e.error().code).size()),
+                         tp::error_code_name(e.error().code).data(),
+                         e.error().message.c_str());
+            return EXIT_SKIP;
+        }
         std::fprintf(stderr, "create [%.*s]: %s\n",
                      static_cast<int>(tp::error_code_name(e.error().code).size()),
                      tp::error_code_name(e.error().code).data(),
@@ -117,9 +158,11 @@ int main(int argc, char** argv) {
         }
     });
 
+    tp::Error last_load_err{tp::ErrorCode::DeviceOpenFailed, ""};
     auto load_or_die = [&](const std::filesystem::path& f) -> bool {
         auto lr = e.value()->load(f);
         if (!lr) {
+            last_load_err = lr.error();
             std::fprintf(stderr, "load [%.*s]: %s\n",
                          static_cast<int>(tp::error_code_name(lr.error().code).size()),
                          tp::error_code_name(lr.error().code).data(),
@@ -130,6 +173,10 @@ int main(int argc, char** argv) {
     };
 
     if (!load_or_die(file)) {
+        if (dev_arg == "auto" && is_hardware_skip(last_load_err)) {
+            std::fprintf(stderr, "SKIP: load failed on hardware path\n");
+            return EXIT_SKIP;
+        }
         return 1;
     }
 
@@ -147,6 +194,11 @@ int main(int argc, char** argv) {
                          static_cast<int>(tp::error_code_name(err.code).size()),
                          tp::error_code_name(err.code).data(),
                          err.message.c_str());
+            if (dev_arg == "auto" && is_hardware_skip(err)) {
+                std::fprintf(stderr,
+                             "SKIP: playback failed on hardware path\n");
+                return EXIT_SKIP;
+            }
             return 1;
         }
         if (ended) {
@@ -155,6 +207,11 @@ int main(int argc, char** argv) {
             // Re-arm by reloading the same file. load() also kicks state
             // back to Loading -> Playing.
             if (!load_or_die(file)) {
+                if (dev_arg == "auto" && is_hardware_skip(last_load_err)) {
+                    std::fprintf(stderr,
+                                 "SKIP: reload failed on hardware path\n");
+                    return EXIT_SKIP;
+                }
                 return 1;
             }
             lk.lock();

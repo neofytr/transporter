@@ -42,6 +42,7 @@ namespace {
 constexpr int EXIT_MATCH = 0;
 constexpr int EXIT_MISMATCH = 1;
 constexpr int EXIT_SETUP = 2;
+constexpr int EXIT_SKIP = 77;
 
 void print_setup_help() {
     std::fprintf(stderr,
@@ -87,10 +88,11 @@ int find_card_by_name(const std::string& needle) {
 
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s <loopback_card_id> <fixture.wav>\n"
+                 "usage: %s <loopback_card_id|auto> <fixture.wav>\n"
                  "  loopback_card_id may be a numeric index or a card name\n"
                  "  substring (case-insensitive). \"Loopback\" is the\n"
-                 "  conventional name created by `modprobe snd-aloop`.\n",
+                 "  conventional name created by `modprobe snd-aloop`.\n"
+                 "  \"auto\" searches for any card named \"Loopback\".\n",
                  argv0);
 }
 
@@ -115,12 +117,17 @@ int main(int argc, char** argv) {
         return EXIT_SETUP;
     }
 
-    const std::string card_arg = argv[1];
+    std::string card_arg = argv[1];
     const std::filesystem::path fixture = argv[2];
 
     if (!std::filesystem::exists(fixture)) {
         std::fprintf(stderr, "fixture not found: %s\n", fixture.c_str());
         return EXIT_SETUP;
+    }
+
+    const bool auto_mode = (card_arg == "auto");
+    if (auto_mode) {
+        card_arg = "Loopback";
     }
 
     int card_index = -1;
@@ -132,6 +139,12 @@ int main(int argc, char** argv) {
         card_index = find_card_by_name(card_arg);
     }
     if (card_index < 0) {
+        if (auto_mode) {
+            std::fprintf(stderr,
+                         "SKIP: snd-aloop not loaded "
+                         "(no card named \"Loopback\" found)\n");
+            return EXIT_SKIP;
+        }
         std::fprintf(stderr,
                      "no ALSA card matches \"%s\".\n", card_arg.c_str());
         print_setup_help();
