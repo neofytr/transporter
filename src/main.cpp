@@ -199,6 +199,29 @@ int main(int argc, char** argv) {
 
     install_signal_handlers();
 
+    // Decide the mode up front so startup messages can be routed correctly.
+    // In TUI mode, notcurses takes over the screen; stderr writes leak into
+    // the alternate-screen scrollback and flash before the TUI paints. Buffer
+    // them and flush after notcurses shuts down so the player surface stays
+    // clean. In daemon mode, stderr is the right channel and is fine live.
+    const bool tty    = (isatty(STDIN_FILENO) != 0)
+                     && (isatty(STDOUT_FILENO) != 0);
+    const bool daemon = args.daemon || !tty;
+
+    std::vector<std::string> deferred_errors;
+    auto log_err = [&](std::string line) {
+        if (!line.empty() && line.back() != '\n') line.push_back('\n');
+        if (daemon) {
+            std::fputs(line.c_str(), stderr);
+        } else {
+            deferred_errors.push_back(std::move(line));
+        }
+    };
+    auto flush_deferred = [&] {
+        for (const auto& s : deferred_errors) std::fputs(s.c_str(), stderr);
+        deferred_errors.clear();
+    };
+
     const std::filesystem::path config_path = args.config_path.empty()
         ? cfg::default_config_path() : args.config_path;
     cfg::Config config = load_config_or_defaults(config_path);
@@ -217,14 +240,12 @@ int main(int argc, char** argv) {
         if (auto e = eng::Engine::create(std::move(ec)); e) {
             engine = std::move(*e);
         } else {
-            std::fprintf(stderr,
-                         "transporter: engine create failed: %s\n",
-                         e.error().message.c_str());
+            log_err(std::string{"transporter: engine create failed: "} +
+                    e.error().message);
         }
     } else {
-        std::fprintf(stderr,
-                     "transporter: no playback device available "
-                     "(%zu enumerated)\n", devices.size());
+        log_err("transporter: no playback device available (" +
+                std::to_string(devices.size()) + " enumerated)");
     }
 
     // Library.
@@ -243,9 +264,8 @@ int main(int argc, char** argv) {
                 library->rescan_async();
             }
         } else {
-            std::fprintf(stderr,
-                         "transporter: library open failed: %s\n",
-                         l.error().message.c_str());
+            log_err(std::string{"transporter: library open failed: "} +
+                    l.error().message);
         }
     }
 
@@ -260,31 +280,27 @@ int main(int argc, char** argv) {
         if (svc) {
             dbus = std::move(*svc);
         } else {
-            std::fprintf(stderr,
-                         "transporter: dbus start failed: %s\n",
-                         svc.error().message.c_str());
+            // Most common cause is "another transporter is already running" —
+            // the MPRIS well-known name is single-owner. The TUI still works
+            // without MPRIS; surface the reason on exit so the user can decide.
+            log_err(std::string{"transporter: MPRIS unavailable: "} +
+                    svc.error().message +
+                    " (running without external control)");
         }
     }
 
     // Optional initial file from argv: load + play immediately.
     if (!args.file.empty() && engine != nullptr) {
         if (auto r = engine->load(args.file); !r) {
-            std::fprintf(stderr,
-                         "transporter: load failed: %s\n",
-                         r.error().message.c_str());
+            log_err(std::string{"transporter: load failed: "} +
+                    r.error().message);
         } else if (auto p = engine->play(); !p) {
-            std::fprintf(stderr,
-                         "transporter: play failed: %s\n",
-                         p.error().message.c_str());
+            log_err(std::string{"transporter: play failed: "} +
+                    p.error().message);
         } else if (dbus != nullptr) {
             dbus->notify_track_loaded();
         }
     }
-
-    // Smart-tty: TUI when stdin/stdout are a real terminal; daemon otherwise.
-    const bool tty    = (isatty(STDIN_FILENO) != 0)
-                     && (isatty(STDOUT_FILENO) != 0);
-    const bool daemon = args.daemon || !tty;
 
     if (daemon) {
         wait_for_termination_signal();
@@ -292,13 +308,16 @@ int main(int argc, char** argv) {
         transporter::tui::InitOptions iopts{};
         iopts.enable_mouse = !args.no_mouse;
         if (transporter::tui::init(iopts) != 0) {
-            std::fprintf(stderr,
-                         "transporter: notcurses init failed, "
-                         "falling back to daemon mode\n");
+            // Screen was never opened, so stderr is still safe — emit any
+            // buffered errors plus the init failure and fall back to daemon.
+            flush_deferred();
+            std::fputs("transporter: notcurses init failed, "
+                       "falling back to daemon mode\n", stderr);
             wait_for_termination_signal();
         } else {
             transporter::tui::run(engine.get(), library.get());
             transporter::tui::shutdown();
+            flush_deferred();
         }
     }
 
