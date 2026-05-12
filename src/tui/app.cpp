@@ -5,10 +5,12 @@
 #include "components/player_bar.hpp"
 #include "input.hpp"
 #include "notcurses_ctx.hpp"
+#include "pages/library.hpp"
 #include "pages/pages.hpp"
 
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/telemetry.hpp>
+#include <transporter/library/library.hpp>
 
 #include <notcurses/notcurses.h>
 
@@ -24,10 +26,17 @@ namespace {
 
 constexpr int kPageCount = 5;
 
-void draw_page(struct ncplane* p, PageId page, int body_y0, int body_rows) {
-    switch (page) {
+struct AppState {
+    PageId active_page = PageId::Library;
+    pages::LibraryPage library_page;
+
+    explicit AppState(library::Library* lib) : library_page(lib) {}
+};
+
+void draw_page(struct ncplane* p, AppState& state, int body_y0, int body_rows) {
+    switch (state.active_page) {
     case PageId::Library:
-        pages::draw_library(p, body_y0, body_rows);
+        state.library_page.draw(p, body_y0, body_rows);
         break;
     case PageId::Queue:
         pages::draw_queue(p, body_y0, body_rows);
@@ -59,10 +68,6 @@ PageId page_prev(PageId p) {
     }
     return static_cast<PageId>(n);
 }
-
-struct AppState {
-    PageId active_page = PageId::Library;
-};
 
 constexpr int kHintRows = 1;
 constexpr int kMinCols = 60;
@@ -99,7 +104,7 @@ void draw_hint(struct ncplane* host, int y, int cols, std::string_view hint) {
 }
 
 void render_frame(struct notcurses* nc, engine::Engine* engine,
-                  const InputMap& input, const AppState& state) {
+                  const InputMap& input, AppState& state) {
     struct ncplane* std_plane = notcurses_stdplane(nc);
     unsigned rows = 0, cols = 0;
     ncplane_dim_yx(std_plane, &rows, &cols);
@@ -115,7 +120,7 @@ void render_frame(struct notcurses* nc, engine::Engine* engine,
     const int body_rows = static_cast<int>(rows)
                         - components::kPlayerBarRows - kHintRows;
     if (body_rows > 0) {
-        draw_page(std_plane, state.active_page, 0, body_rows);
+        draw_page(std_plane, state, 0, body_rows);
     }
     const int hint_y = static_cast<int>(rows)
                      - components::kPlayerBarRows - kHintRows;
@@ -174,6 +179,46 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
             }
         }
         return true;
+    case Command::MoveLeft:
+        if (state.active_page == PageId::Library) {
+            state.library_page.move_left(cr.count);
+        }
+        return true;
+    case Command::MoveRight:
+        if (state.active_page == PageId::Library) {
+            state.library_page.move_right(cr.count);
+        }
+        return true;
+    case Command::MoveUp:
+        if (state.active_page == PageId::Library) {
+            state.library_page.move_up(cr.count);
+        }
+        return true;
+    case Command::MoveDown:
+        if (state.active_page == PageId::Library) {
+            state.library_page.move_down(cr.count);
+        }
+        return true;
+    case Command::GotoTop:
+        if (state.active_page == PageId::Library) {
+            state.library_page.goto_top();
+        }
+        return true;
+    case Command::GotoBottom:
+        if (state.active_page == PageId::Library) {
+            state.library_page.goto_bottom();
+        }
+        return true;
+    case Command::ScrollDown:
+        if (state.active_page == PageId::Library) {
+            state.library_page.half_page_down();
+        }
+        return true;
+    case Command::ScrollUp:
+        if (state.active_page == PageId::Library) {
+            state.library_page.half_page_up();
+        }
+        return true;
     case Command::SubmitInput: {
         if (input.mode() == Mode::Command) {
             const auto& b = input.buffer();
@@ -195,14 +240,14 @@ bool dispatch_command(const CommandResult& cr, engine::Engine* engine,
 
 } // namespace
 
-int run(engine::Engine* engine, library::Library* /*library*/) {
+int run(engine::Engine* engine, library::Library* library) {
     struct notcurses* nc = current_context();
     if (nc == nullptr) {
         return -1;
     }
 
     InputMap input;
-    AppState state;
+    AppState state(library);
     render_frame(nc, engine, input, state);
 
     for (;;) {

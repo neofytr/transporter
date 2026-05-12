@@ -3,6 +3,7 @@
 #include "pages.hpp"
 
 #include "../app.hpp"
+#include "draw_util.hpp"
 
 #include <notcurses/notcurses.h>
 
@@ -15,56 +16,6 @@
 namespace transporter::tui::pages {
 
 namespace {
-
-// Draw a rounded-border rectangle into `host` covering body region. The
-// title is embedded into the top edge as "╭─ Title ────...─╮".
-void draw_frame(struct ncplane* host, int y0, int rows,
-                std::string_view title) {
-    unsigned hrows = 0, hcols = 0;
-    ncplane_dim_yx(host, &hrows, &hcols);
-    if (rows < 3 || hcols < 6) {
-        return;
-    }
-    const int w = static_cast<int>(hcols);
-    const int x_right = w - 1;
-    const int y_bottom = y0 + rows - 1;
-
-    // Top edge with embedded title.
-    ncplane_putstr_yx(host, y0, 0, "╭");
-    ncplane_putstr_yx(host, y0, 1, "─ ");
-    ncplane_putstr_yx(host, y0, 3, title.data());
-    const int title_end = 3 + static_cast<int>(title.size());
-    ncplane_putstr_yx(host, y0, title_end, " ");
-    for (int x = title_end + 1; x < x_right; ++x) {
-        ncplane_putstr_yx(host, y0, x, "─");
-    }
-    ncplane_putstr_yx(host, y0, x_right, "╮");
-
-    // Side edges.
-    for (int y = y0 + 1; y < y_bottom; ++y) {
-        ncplane_putstr_yx(host, y, 0, "│");
-        ncplane_putstr_yx(host, y, x_right, "│");
-    }
-
-    // Bottom edge.
-    ncplane_putstr_yx(host, y_bottom, 0, "╰");
-    for (int x = 1; x < x_right; ++x) {
-        ncplane_putstr_yx(host, y_bottom, x, "─");
-    }
-    ncplane_putstr_yx(host, y_bottom, x_right, "╯");
-}
-
-// Put a centered string at row y within the host plane.
-void put_centered(struct ncplane* host, int y, std::string_view s) {
-    unsigned rows = 0, cols = 0;
-    ncplane_dim_yx(host, &rows, &cols);
-    (void)rows;
-    const int x = (static_cast<int>(cols) - static_cast<int>(s.size())) / 2;
-    if (x < 0) {
-        return;
-    }
-    ncplane_putstr_yx(host, y, x, s.data());
-}
 
 void draw_stub(struct ncplane* host, int y0, int rows,
                std::string_view title,
@@ -84,13 +35,6 @@ void draw_stub(struct ncplane* host, int y0, int rows,
 }
 
 } // namespace
-
-void draw_library(struct ncplane* host, int body_y0, int body_rows) {
-    draw_stub(host, body_y0, body_rows,
-              "Library",
-              "Library",
-              "Browse your albums — coming in T2");
-}
 
 void draw_queue(struct ncplane* host, int body_y0, int body_rows) {
     draw_stub(host, body_y0, body_rows,
