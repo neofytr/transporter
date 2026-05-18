@@ -2,6 +2,7 @@
 
 #include <transporter/web/server.hpp>
 
+#include <transporter/config/config.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/engine/telemetry.hpp>
 #include <transporter/library/library.hpp>
@@ -16,6 +17,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -688,6 +690,27 @@ struct WebServer::Impl {
                 });
             }
             send_json(res, 200, arr);
+        });
+
+        srv.Post("/api/devices/select", [this](const httplib::Request& req,
+                                               httplib::Response& res) {
+            auto b = parse_body(req, res);
+            if (!b) {
+                return;
+            }
+            if (!b->contains("alsa_hw_string") ||
+                !(*b)["alsa_hw_string"].is_string()) {
+                bad_request(res);
+                return;
+            }
+            const std::string hw = (*b)["alsa_hw_string"].get<std::string>();
+            if (!cfg.config_path.empty()) {
+                transporter::config::save_device_preferred(cfg.config_path, hw);
+            }
+            send_json(res, 200, json{{"ok", true}, {"restart_required", true}});
+            // Signal main to exit; the user or init system restarts the process
+            // with the new preferred device written to the config file.
+            ::raise(SIGTERM);
         });
 
         srv.Get(R"(/api/art/(\d+))", [this](const httplib::Request& req,

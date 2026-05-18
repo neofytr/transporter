@@ -192,6 +192,10 @@ export const api = {
     return request<DeviceInfo[]>('GET', '/api/devices')
   },
 
+  selectDevice(alsa_hw_string: string): Promise<{ ok: boolean; restart_required: boolean }> {
+    return request('POST', '/api/devices/select', { alsa_hw_string })
+  },
+
   artUrl(trackId: number): string {
     return `${BASE}/api/art/${trackId}`
   },

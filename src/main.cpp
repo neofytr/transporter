@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
     std::unique_ptr<transporter::web::WebServer> web_server;
     if (engine != nullptr && queue != nullptr) {
         transporter::web::WebConfig wcfg{};
-        // TODO: read from config once config module exposes a web section.
+        wcfg.config_path = config_path.string();
         web_server = std::make_unique<transporter::web::WebServer>(
             *engine, *queue, library.get(), wcfg);
         web_server->start();

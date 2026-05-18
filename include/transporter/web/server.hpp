@@ -21,6 +21,7 @@ struct WebConfig {
     int         port       = 7800;
     std::string token;  // empty = no auth
     std::string static_dir = "web/dist";
+    std::string config_path;  // written by /api/devices/select; empty = no-op
 };
 
 // Embedded HTTP server. REST control surface plus a 10 Hz WebSocket telemetry

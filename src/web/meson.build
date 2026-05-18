@@ -13,12 +13,12 @@ web_lib = static_library(
   'transporter_web',
   'server.cpp',
   include_directories : [inc_public, include_directories('../..')],
-  dependencies : [engine_dep, queue_dep, library_dep, httplib_dep, nlohmann_dep, flac_dep],
+  dependencies : [engine_dep, queue_dep, library_dep, config_dep, httplib_dep, nlohmann_dep, flac_dep],
   cpp_args : ['-w'],
 )
 
 web_dep = declare_dependency(
   link_with : web_lib,
   include_directories : [inc_public],
-  dependencies : [engine_dep, queue_dep, library_dep, httplib_dep, nlohmann_dep, flac_dep],
+  dependencies : [engine_dep, queue_dep, library_dep, config_dep, httplib_dep, nlohmann_dep, flac_dep],
 )
