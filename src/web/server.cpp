@@ -7,6 +7,8 @@
 #include <transporter/library/library.hpp>
 #include <transporter/queue/queue.hpp>
 
+#include <FLAC/metadata.h>
+
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
@@ -163,6 +165,60 @@ json track_json(const lib::Track& t) {
                        std::to_string(t.bit_depth) + "/" +
                        std::to_string(t.channels)},
     };
+}
+
+// Scan a FLAC file's metadata blocks for any embedded PICTURE. Prefers
+// FRONT_COVER type; falls back to the first picture found. Returns false
+// when the file has no embedded image or is not a valid FLAC file.
+bool read_flac_embedded_art(const std::filesystem::path& path,
+                             std::string& data_out,
+                             std::string& mime_out) {
+    FLAC__Metadata_Chain* chain = FLAC__metadata_chain_new();
+    if (!chain) {
+        return false;
+    }
+    struct ChainGuard {
+        FLAC__Metadata_Chain* c;
+        ~ChainGuard() { FLAC__metadata_chain_delete(c); }
+    } cg{chain};
+
+    if (!FLAC__metadata_chain_read(chain, path.c_str())) {
+        return false;
+    }
+
+    FLAC__Metadata_Iterator* it = FLAC__metadata_iterator_new();
+    if (!it) {
+        return false;
+    }
+    struct ItGuard {
+        FLAC__Metadata_Iterator* i;
+        ~ItGuard() { FLAC__metadata_iterator_delete(i); }
+    } ig{it};
+
+    FLAC__metadata_iterator_init(it, chain);
+
+    bool found_any = false;
+    do {
+        FLAC__StreamMetadata* block = FLAC__metadata_iterator_get_block(it);
+        if (!block || block->type != FLAC__METADATA_TYPE_PICTURE) {
+            continue;
+        }
+        const auto& pic = block->data.picture;
+        if (pic.type == FLAC__STREAM_METADATA_PICTURE_TYPE_FRONT_COVER) {
+            mime_out.assign(pic.mime_type ? pic.mime_type : "image/jpeg");
+            data_out.assign(reinterpret_cast<const char*>(pic.data),
+                            pic.data_length);
+            return true;
+        }
+        if (!found_any) {
+            mime_out.assign(pic.mime_type ? pic.mime_type : "image/jpeg");
+            data_out.assign(reinterpret_cast<const char*>(pic.data),
+                            pic.data_length);
+            found_any = true;
+        }
+    } while (FLAC__metadata_iterator_next(it));
+
+    return found_any;
 }
 
 }  // namespace
@@ -344,10 +400,16 @@ struct WebServer::Impl {
             not_found(res);
             return;
         }
+
+        // Sidecar: case-sensitive names; try common variants.
         const std::filesystem::path dir = tr->path.parent_path();
-        static constexpr const char* kNames[] = {
-            "cover.jpg", "cover.png", "folder.jpg", "folder.png"};
-        for (const char* n : kNames) {
+        static constexpr const char* kSidecar[] = {
+            "cover.jpg",  "cover.png",  "Cover.jpg",  "Cover.png",
+            "folder.jpg", "folder.png", "Folder.jpg", "Folder.png",
+            "front.jpg",  "front.png",  "Front.jpg",  "Front.png",
+            "artwork.jpg","artwork.png","AlbumArt.jpg","AlbumArtSmall.jpg",
+        };
+        for (const char* n : kSidecar) {
             const std::filesystem::path art = dir / n;
             std::string body;
             if (read_file(art, body)) {
@@ -355,6 +417,19 @@ struct WebServer::Impl {
                 return;
             }
         }
+
+        // Embedded art: FLAC PICTURE metadata block.
+        auto ext = tr->path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+        if (ext == ".flac") {
+            std::string body, mime;
+            if (read_flac_embedded_art(tr->path, body, mime)) {
+                res.set_content(body, mime);
+                return;
+            }
+        }
+
         not_found(res);
     }
 
