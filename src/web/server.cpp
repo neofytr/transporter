@@ -453,7 +453,7 @@ struct WebServer::Impl {
                 const std::string& p = req.path;
                 const bool exempt =
                     p == "/" || p.rfind("/api/art/", 0) == 0 ||
-                    p.rfind("/api/", 0) != 0;  // static assets are exempt
+                    p.rfind("/api/", 0) != 0;
                 if (exempt) {
                     return httplib::Server::HandlerResponse::Unhandled;
                 }
@@ -733,6 +733,29 @@ struct WebServer::Impl {
                 return;
             }
             serve_art(id, res);
+        });
+
+        // Convenience: art for an album by album id. Finds the first track and
+        // delegates to serve_art so the same sidecar + embedded logic applies.
+        srv.Get(R"(/api/art/album/(\d+))", [this](const httplib::Request& req,
+                                                   httplib::Response& res) {
+            if (library == nullptr) {
+                not_found(res);
+                return;
+            }
+            std::int64_t album_id = 0;
+            try {
+                album_id = std::stoll(req.matches[1]);
+            } catch (...) {
+                not_found(res);
+                return;
+            }
+            auto tracks = library->tracks_in_album(album_id);
+            if (!tracks || tracks->empty()) {
+                not_found(res);
+                return;
+            }
+            serve_art((*tracks)[0].id, res);
         });
 
         // 10 Hz pipeline telemetry. The handler registers the socket and

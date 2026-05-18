@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { snapshot } from '../lib/stores'
   import { formatLabel, parseFormat } from '../lib/ws'
   import PipelineStageCard from '../components/PipelineStageCard.svelte'
@@ -18,18 +19,20 @@
   $effect(() => {
     const s = $snapshot
     if (!s) return
-
     const pct =
       s.ring.capacity_bytes > 0
         ? (s.ring.fill_bytes / s.ring.capacity_bytes) * 100
         : 0
-    ringFill = [...ringFill, pct].slice(-MAX_POINTS)
-
     const xc = s.output.xrun_count
-    if (lastXrunCount >= 0 && xc > lastXrunCount) {
-      xrunEvents = [...xrunEvents, Date.now()].slice(-200)
-    }
-    lastXrunCount = xc
+    // untrack: writing $state inside an effect that reads $snapshot must not
+    // re-trigger the same effect, or it loops at 10 Hz forever.
+    untrack(() => {
+      ringFill = [...ringFill, pct].slice(-MAX_POINTS)
+      if (lastXrunCount >= 0 && xc > lastXrunCount) {
+        xrunEvents = [...xrunEvents, Date.now()].slice(-200)
+      }
+      lastXrunCount = xc
+    })
   })
 
   // Xrun timeline geometry.

@@ -199,6 +199,10 @@ export const api = {
   artUrl(trackId: number): string {
     return `${BASE}/api/art/${trackId}`
   },
+
+  albumArtUrl(albumId: number): string {
+    return `${BASE}/api/art/album/${albumId}`
+  },
 }
 
 export { ApiError }

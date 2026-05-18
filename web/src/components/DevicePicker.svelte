@@ -102,11 +102,11 @@
                 disabled={dev.active || dev.caps_probe_failed || restarting}
               >
                 <div class="flex items-start gap-3">
-                  <div class="mt-0.5 shrink-0 text-white/40">
+                  <div class="mt-0.5 shrink-0 {dev.active ? 'text-accent' : 'text-white/40'}">
                     {#if dev.is_usb}
-                      <Usb size={16} class={dev.active ? 'text-accent' : ''} />
+                      <Usb size={16} />
                     {:else}
-                      <Cpu size={16} class={dev.active ? 'text-accent' : ''} />
+                      <Cpu size={16} />
                     {/if}
                   </div>
 
