@@ -52,18 +52,21 @@ inc_public = include_directories('include')
 subdir('third_party/alac')
 subdir('third_party/doctest')
 subdir('third_party/tomlpp')
+subdir('third_party/httplib')
+subdir('third_party/nlohmann')
 subdir('src/engine')
 subdir('src/library')
 subdir('src/dbus')
 subdir('src/hotplug')
 subdir('src/config')
 subdir('src/queue')
+subdir('src/web')
 
 executable(
   'transporter',
   'src/main.cpp',
   include_directories : [inc_public, include_directories('src')],
-  dependencies : [engine_dep, library_dep, config_dep, dbus_dep, queue_dep],
+  dependencies : [engine_dep, library_dep, config_dep, dbus_dep, queue_dep, web_dep],
   install : true,
 )
 

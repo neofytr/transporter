@@ -7,6 +7,7 @@
 #include <transporter/library/library.hpp>
 #include <transporter/queue/queue.hpp>
 #include <transporter/version.hpp>
+#include <transporter/web/server.hpp>
 
 #include <atomic>
 #include <cerrno>
@@ -247,8 +248,23 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Web server: REST control surface + 10 Hz telemetry WebSocket. Requires
+    // engine and queue; skipped headless if either is unavailable.
+    std::unique_ptr<transporter::web::WebServer> web_server;
+    if (engine != nullptr && queue != nullptr) {
+        transporter::web::WebConfig wcfg{};
+        // TODO: read from config once config module exposes a web section.
+        web_server = std::make_unique<transporter::web::WebServer>(
+            *engine, *queue, library.get(), wcfg);
+        web_server->start();
+    }
+
     wait_for_termination_signal();
 
+    if (web_server != nullptr) {
+        web_server->stop();
+        web_server.reset();
+    }
     if (dbus != nullptr) {
         dbus->shutdown();
         dbus.reset();
