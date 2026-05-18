@@ -52,17 +52,35 @@
     }
   }
 
+  // Clear queue, load this track, start playing.
   function playTrack(t: LibTrack) {
     act(async () => {
+      await api.clearQueue()
       await api.appendToQueue(t.path)
+      await api.jumpToQueue(0)
     }, t.id)
   }
 
+  // Append single track without disturbing playback.
   function appendTrack(t: LibTrack) {
     act(() => api.appendToQueue(t.path), t.id)
   }
 
-  async function appendAll() {
+  // Clear queue, load entire album in order, start playing.
+  async function playAll() {
+    await api.clearQueue()
+    for (const t of tracks) {
+      try {
+        await api.appendToQueue(t.path)
+      } catch {
+        break
+      }
+    }
+    await api.jumpToQueue(0)
+  }
+
+  // Append entire album to end of existing queue.
+  async function addAll() {
     for (const t of tracks) {
       try {
         await api.appendToQueue(t.path)
@@ -113,12 +131,20 @@
           {#if album.year}· {album.year}{/if}
           {#if totalFrames > 0}· {fmtTime(totalFrames, sampleRate)}{/if}
         </div>
-        <button
-          class="mt-4 flex w-fit items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-semibold text-black transition hover:brightness-110"
-          onclick={appendAll}
-        >
-          <ListPlus size={16} /> Queue album
-        </button>
+        <div class="mt-4 flex gap-2">
+          <button
+            class="flex items-center gap-2 rounded-full bg-accent px-4 py-1.5 text-xs font-semibold text-black transition hover:brightness-110"
+            onclick={playAll}
+          >
+            <Play size={13} fill="currentColor" /> Play album
+          </button>
+          <button
+            class="flex items-center gap-2 rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/70 transition hover:bg-white/10"
+            onclick={addAll}
+          >
+            <ListPlus size={13} /> Add to queue
+          </button>
+        </div>
       </div>
     </div>
 

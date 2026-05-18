@@ -1,6 +1,7 @@
 <script lang="ts">
   import { activeTab, backendOnline } from '../lib/stores'
-  import { Disc3, Library, ListMusic, Activity } from 'lucide-svelte'
+  import { Disc3, Library, ListMusic, Activity, AudioLines } from 'lucide-svelte'
+  import DevicePicker from './DevicePicker.svelte'
 
   const tabs = [
     { id: 'nowplaying', label: 'Now Playing', icon: Disc3 },
@@ -8,6 +9,8 @@
     { id: 'queue', label: 'Queue', icon: ListMusic },
     { id: 'pipeline', label: 'Pipeline', icon: Activity },
   ] as const
+
+  let showDevicePicker = $state(false)
 </script>
 
 <nav
@@ -28,6 +31,15 @@
   {/each}
 
   <div class="ml-2 mr-1 flex items-center gap-1.5 pl-3 border-l border-white/10">
+    <button
+      class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-white/50 transition hover:bg-white/10 hover:text-white/80"
+      onclick={() => (showDevicePicker = !showDevicePicker)}
+      title="Playback devices"
+    >
+      <AudioLines size={13} />
+      <span>DAC</span>
+    </button>
+
     <span
       class="h-2 w-2 rounded-full {$backendOnline
         ? 'bg-emerald-400'
@@ -39,3 +51,7 @@
     </span>
   </div>
 </nav>
+
+{#if showDevicePicker}
+  <DevicePicker onClose={() => (showDevicePicker = false)} />
+{/if}

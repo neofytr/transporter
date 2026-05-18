@@ -576,6 +576,45 @@ struct WebServer::Impl {
             send_json(res, 200, arr);
         });
 
+        srv.Get("/api/devices", [this](const httplib::Request&,
+                                         httplib::Response& res) {
+            auto devs_r = eng::list_playback_devices();
+            json arr = json::array();
+            if (!devs_r) {
+                send_json(res, 200, arr);
+                return;
+            }
+            std::string active_hw;
+            {
+                auto snap = engine.pipeline_snapshot();
+                active_hw = snap.device.current_hw_string;
+            }
+            for (const auto& d : *devs_r) {
+                json formats = json::array();
+                for (auto f : d.caps.formats) {
+                    formats.push_back(std::string(eng::sample_format_name(f)));
+                }
+                json rates = json::array();
+                for (auto r : d.caps.sample_rates) {
+                    rates.push_back(r);
+                }
+                std::string display_name = d.fingerprint.alsa_card_longname.empty()
+                    ? d.alsa_hw_string : d.fingerprint.alsa_card_longname;
+                arr.push_back({
+                    {"id",             d.id},
+                    {"alsa_hw_string", d.alsa_hw_string},
+                    {"display_name",   display_name},
+                    {"is_usb",         d.fingerprint.is_usb},
+                    {"active",         d.alsa_hw_string == active_hw},
+                    {"caps_probe_failed", d.caps.caps_probe_failed},
+                    {"probe_failure_reason", d.caps.probe_failure_reason},
+                    {"formats",        formats},
+                    {"sample_rates",   rates},
+                });
+            }
+            send_json(res, 200, arr);
+        });
+
         srv.Get(R"(/api/art/(\d+))", [this](const httplib::Request& req,
                                              httplib::Response& res) {
             std::int64_t id = 0;

@@ -94,28 +94,28 @@
 
   <div class="relative z-10 flex h-full items-center justify-center p-8">
     <div
-      class="glass-strong flex w-full max-w-4xl flex-col gap-8 p-8 md:flex-row md:items-center"
+      class="glass-strong flex w-full max-w-3xl flex-col gap-5 p-6 md:flex-row md:items-center"
       style="box-shadow: 0 0 0 1px rgb(var(--accent) / 0.18), 0 30px 80px -20px rgb(var(--accent) / 0.35);"
     >
-      <div class="mx-auto w-64 shrink-0 md:mx-0">
+      <div class="mx-auto w-44 shrink-0 md:mx-0">
         <CoverArt track_id={artId} size="large" extractColor={true} />
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-6">
         <div class="min-w-0">
           {#if track}
-            <h1 class="truncate text-4xl font-bold leading-tight text-white">
+            <h1 class="truncate text-xl font-semibold leading-tight text-white">
               {track.title || track.path.split('/').pop()}
             </h1>
-            <p class="mt-2 truncate text-xl text-white/70">
+            <p class="mt-1.5 truncate text-sm text-white/70">
               {track.artist || 'Unknown artist'}
             </p>
-            <p class="mt-1 truncate text-sm text-white/50">
+            <p class="mt-0.5 truncate text-xs text-white/45">
               {track.album || ''}
             </p>
           {:else}
-            <h1 class="text-3xl font-bold text-white/70">Nothing playing</h1>
-            <p class="mt-2 text-sm text-white/40">
+            <h1 class="text-base font-semibold text-white/70">Nothing playing</h1>
+            <p class="mt-1 text-xs text-white/40">
               Queue a track from the Library.
             </p>
           {/if}

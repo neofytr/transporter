@@ -64,6 +64,18 @@ export interface LibTrack {
   format: string
 }
 
+export interface DeviceInfo {
+  id: string
+  alsa_hw_string: string
+  display_name: string
+  is_usb: boolean
+  active: boolean
+  caps_probe_failed: boolean
+  probe_failure_reason: string
+  formats: string[]
+  sample_rates: number[]
+}
+
 interface QueueResponse {
   tracks: QueueItem[]
   current_index: number
@@ -174,6 +186,10 @@ export const api = {
       'GET',
       `/api/library/search?q=${encodeURIComponent(query)}`,
     )
+  },
+
+  getDevices(): Promise<DeviceInfo[]> {
+    return request<DeviceInfo[]>('GET', '/api/devices')
   },
 
   artUrl(trackId: number): string {
