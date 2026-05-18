@@ -381,11 +381,21 @@ struct WebServer::Impl {
             cand_abs.string().rfind(root_abs.string(), 0) == 0;
 
         if (inside && read_file(candidate, body)) {
+            auto ext = candidate.extension().string();
+            if (ext == ".js" || ext == ".css" || ext == ".woff2") {
+                // Hashed asset filenames — safe to cache forever.
+                res.set_header("Cache-Control",
+                               "public, max-age=31536000, immutable");
+            } else if (ext == ".html") {
+                // HTML files reference hashed assets; must not be stale.
+                res.set_header("Cache-Control", "no-store");
+            }
             res.set_content(body, mime_for(candidate));
             return;
         }
         // SPA fallback: serve index.html for unknown non-API paths.
         if (read_file(root / "index.html", body)) {
+            res.set_header("Cache-Control", "no-store");
             res.set_content(body, "text/html; charset=utf-8");
             return;
         }
