@@ -7,7 +7,7 @@
     snapshot,
     backendOnline,
   } from './lib/stores'
-  import { api, hasToken, setToken } from './lib/api'
+  import { api, setToken, ApiError } from './lib/api'
   import { connectSnapshot } from './lib/ws'
   import Nav from './components/Nav.svelte'
   import NowPlaying from './pages/NowPlaying.svelte'
@@ -22,12 +22,7 @@
   function saveToken() {
     setToken(tokenInput)
     needToken = false
-  }
-
-  function skipToken() {
-    // Server with no auth (empty token) -- store empty so we don't ask again.
-    setToken('')
-    needToken = false
+    poll()
   }
 
   async function poll() {
@@ -36,16 +31,18 @@
       $playerState = st
       $queueStore = q
       $backendOnline = true
-    } catch {
+      needToken = false
+    } catch (e: unknown) {
+      // Only surface the token prompt on an explicit 401; network errors just
+      // mean the daemon is down, not that auth is required.
+      if (e instanceof ApiError && e.status === 401) {
+        needToken = true
+      }
       $backendOnline = false
     }
   }
 
   onMount(() => {
-    if (!hasToken()) {
-      needToken = true
-    }
-
     poll()
     const pollTimer = setInterval(poll, 1000)
 
@@ -114,9 +111,9 @@
         </button>
         <button
           class="rounded-xl border border-white/15 px-5 py-2.5 text-sm text-white/70 transition hover:bg-white/10"
-          onclick={skipToken}
+          onclick={() => { needToken = false }}
         >
-          No auth
+          Skip
         </button>
       </div>
     </div>
