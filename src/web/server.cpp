@@ -13,6 +13,8 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -413,31 +415,72 @@ struct WebServer::Impl {
             return;
         }
 
-        // Sidecar: case-sensitive names; try common variants.
         const std::filesystem::path dir = tr->path.parent_path();
+
+        // 1. Embedded art: FLAC PICTURE metadata block (fastest, no I/O scan).
+        {
+            auto ext = tr->path.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+            if (ext == ".flac") {
+                std::string body, mime;
+                if (read_flac_embedded_art(tr->path, body, mime)) {
+                    res.set_content(body, mime);
+                    return;
+                }
+            }
+        }
+
+        // 2. Named sidecar: common cover art filenames (case variants).
         static constexpr const char* kSidecar[] = {
-            "cover.jpg",  "cover.png",  "Cover.jpg",  "Cover.png",
-            "folder.jpg", "folder.png", "Folder.jpg", "Folder.png",
-            "front.jpg",  "front.png",  "Front.jpg",  "Front.png",
-            "artwork.jpg","artwork.png","AlbumArt.jpg","AlbumArtSmall.jpg",
+            "cover.jpg",  "cover.png",  "cover.webp",
+            "Cover.jpg",  "Cover.png",
+            "folder.jpg", "folder.png",
+            "Folder.jpg", "Folder.png",
+            "front.jpg",  "front.png",
+            "Front.jpg",  "Front.png",
+            "artwork.jpg","artwork.png",
+            "AlbumArt.jpg","AlbumArtSmall.jpg",
         };
         for (const char* n : kSidecar) {
-            const std::filesystem::path art = dir / n;
             std::string body;
-            if (read_file(art, body)) {
-                res.set_content(body, mime_for(art));
+            if (read_file(dir / n, body)) {
+                const std::filesystem::path p{n};
+                res.set_content(body, mime_for(p));
                 return;
             }
         }
 
-        // Embedded art: FLAC PICTURE metadata block.
-        auto ext = tr->path.extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(),
-                       [](unsigned char c) { return static_cast<char>(::tolower(c)); });
-        if (ext == ".flac") {
-            std::string body, mime;
-            if (read_flac_embedded_art(tr->path, body, mime)) {
-                res.set_content(body, mime);
+        // 3. Any image in the album directory (pick the largest to prefer
+        //    the hi-res scan over thumbnails).
+        {
+            std::string best_body;
+            std::string best_mime;
+            std::uintmax_t best_size = 0;
+            std::error_code ec;
+            for (const auto& entry :
+                 std::filesystem::directory_iterator(dir, ec)) {
+                if (!entry.is_regular_file(ec)) {
+                    continue;
+                }
+                auto e = entry.path().extension().string();
+                std::transform(e.begin(), e.end(), e.begin(),
+                               [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+                if (e != ".jpg" && e != ".jpeg" && e != ".png" && e != ".webp") {
+                    continue;
+                }
+                const auto sz = entry.file_size(ec);
+                if (sz > best_size) {
+                    std::string body;
+                    if (read_file(entry.path(), body)) {
+                        best_body = std::move(body);
+                        best_mime = mime_for(entry.path());
+                        best_size = sz;
+                    }
+                }
+            }
+            if (!best_body.empty()) {
+                res.set_content(best_body, best_mime);
                 return;
             }
         }
@@ -718,9 +761,10 @@ struct WebServer::Impl {
                 transporter::config::save_device_preferred(cfg.config_path, hw);
             }
             send_json(res, 200, json{{"ok", true}, {"restart_required", true}});
-            // Signal main to exit; the user or init system restarts the process
-            // with the new preferred device written to the config file.
-            ::raise(SIGTERM);
+            // kill(getpid()) delivers to the process (kernel picks a thread),
+            // so main()'s sigsuspend() wakes up. raise() would only signal
+            // the calling thread, leaving main asleep forever.
+            ::kill(::getpid(), SIGTERM);
         });
 
         srv.Get(R"(/api/art/(\d+))", [this](const httplib::Request& req,
