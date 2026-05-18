@@ -211,6 +211,10 @@ struct Engine::Impl {
     std::atomic<bool> decoder_eof{false};
     std::atomic<bool> audio_done{false};
     std::atomic<bool> audio_paused{false};
+    // Set true by the audio thread on every iteration where it is in the pause
+    // loop (i.e. not touching the ring). seek_frame_() waits on this before
+    // replacing the ring pointer, replacing the sleep-based approximation.
+    std::atomic<bool> audio_paused_ack{false};
     std::atomic<bool> audio_error{false};
     Error last_audio_error{ErrorCode::WriteFailed, ""};
 
@@ -491,9 +495,11 @@ struct Engine::Impl {
 
         while (audio_run.load(std::memory_order_acquire)) {
             if (audio_paused.load(std::memory_order_acquire)) {
+                audio_paused_ack.store(true, std::memory_order_release);
                 std::this_thread::sleep_for(2ms);
                 continue;
             }
+            audio_paused_ack.store(false, std::memory_order_relaxed);
             const std::size_t avail = ring->readable();
             ring_fill_bytes.store(avail, std::memory_order_relaxed);
             if (avail == 0) {
@@ -582,8 +588,13 @@ struct Engine::Impl {
             decoder_thread.join();
         }
 
-        // Wait one audio-thread sleep cycle to ensure it has left ring->read().
-        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        // Wait for the audio thread to confirm it is in the pause loop.
+        // audio_paused_ack is stored (release) before the thread sleeps,
+        // so this acquire load forms a happens-before: the ring is not
+        // touched by the audio thread once the flag is observed true.
+        for (int i = 0; i < 100 && !audio_paused_ack.load(std::memory_order_acquire); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
 
         // Re-create ring: clean slate for the decoder thread to fill from the
         // new position. Audio thread is in its pause loop and not touching it.
@@ -641,6 +652,7 @@ struct Engine::Impl {
         decoder_eof.store(false, std::memory_order_release);
         audio_done.store(false, std::memory_order_release);
         audio_paused.store(false, std::memory_order_release);
+        audio_paused_ack.store(false, std::memory_order_relaxed);
         audio_error.store(false, std::memory_order_release);
         decode_state.store(DecodeState::Idle, std::memory_order_relaxed);
         ring_fill_bytes.store(0, std::memory_order_relaxed);

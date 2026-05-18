@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "tui/app.hpp"
-#include "tui/notcurses_ctx.hpp"
-
 #include <transporter/config/config.hpp>
 #include <transporter/dbus/service.hpp>
 #include <transporter/engine/device.hpp>
 #include <transporter/engine/engine.hpp>
 #include <transporter/library/library.hpp>
+#include <transporter/queue/queue.hpp>
 #include <transporter/version.hpp>
 
 #include <atomic>
@@ -36,37 +34,21 @@ void print_help() {
     std::fputs(
         "usage: transporter [OPTIONS] [FILE]\n"
         "\n"
-        "Linux-native, bit-perfect music player. TUI when stdin/stdout are a\n"
-        "real tty; MPRIS-only daemon otherwise.\n"
+        "Linux-native, bit-perfect music player. MPRIS daemon; TUI coming later.\n"
         "\n"
         "Options:\n"
-        "  --daemon            Force daemon mode (no TUI, MPRIS only)\n"
-        "  --no-mouse          Disable mouse handling in the TUI\n"
         "  --config PATH       Override config file path\n"
         "  --library-db PATH   Override library SQLite path\n"
-        "  --probe-terminal    Print terminal capability matrix and exit\n"
         "  --version, -V       Print version and exit\n"
         "  --help, -h          Print this help and exit\n"
         "\n"
-        "Positional FILE is loaded and played at launch.\n"
-        "\n"
-        "Keys (TUI):\n"
-        "  1..5            Switch to page (Library/Queue/NowPlaying/Pipeline/Settings)\n"
-        "  Tab / S-Tab     Cycle pages\n"
-        "  h j k l         Move (arrows also work)\n"
-        "  gg / G          Top / bottom; prefix with count, e.g. 5j\n"
-        "  space           Play / pause\n"
-        "  / : ?           Search / command palette / help overlay\n"
-        "  q : q  Ctrl-C   Quit\n",
+        "Positional FILE is loaded and played at launch.\n",
         stdout);
 }
 
 struct ParsedArgs {
-    bool show_version    = false;
-    bool show_help       = false;
-    bool daemon          = false;
-    bool no_mouse        = false;
-    bool probe_terminal  = false;
+    bool show_version   = false;
+    bool show_help      = false;
     std::filesystem::path config_path;
     std::filesystem::path library_db_path;
     std::filesystem::path file;
@@ -87,12 +69,6 @@ ParsedArgs parse_args(int argc, char** argv) {
             out.show_version = true;
         } else if (a == "--help" || a == "-h") {
             out.show_help = true;
-        } else if (a == "--daemon") {
-            out.daemon = true;
-        } else if (a == "--no-mouse") {
-            out.no_mouse = true;
-        } else if (a == "--probe-terminal") {
-            out.probe_terminal = true;
         } else if (needs_value(a)) {
             if (i + 1 >= args.size()) {
                 out.error = true;
@@ -124,6 +100,7 @@ namespace eng = transporter::engine;
 namespace cfg = transporter::config;
 namespace lib = transporter::library;
 namespace dbs = transporter::dbus_svc;
+namespace que = transporter::queue;
 
 std::string pick_device(const cfg::Config& c,
                         const std::vector<eng::DeviceInfo>& devices) {
@@ -147,8 +124,6 @@ cfg::Config load_config_or_defaults(const std::filesystem::path& path) {
     return cfg::Config{};
 }
 
-// Signal-based shutdown for daemon mode. Stored as a sig_atomic_t flag and
-// polled with sigsuspend so the engine event-loop thread keeps running.
 std::atomic<int> g_signal{0};
 
 void install_signal_handlers() {
@@ -192,42 +167,13 @@ int main(int argc, char** argv) {
         print_version();
         return 0;
     }
-    if (args.probe_terminal) {
-        transporter::tui::print_capabilities();
-        return 0;
-    }
 
     install_signal_handlers();
-
-    // Decide the mode up front so startup messages can be routed correctly.
-    // In TUI mode, notcurses takes over the screen; stderr writes leak into
-    // the alternate-screen scrollback and flash before the TUI paints. Buffer
-    // them and flush after notcurses shuts down so the player surface stays
-    // clean. In daemon mode, stderr is the right channel and is fine live.
-    const bool tty    = (isatty(STDIN_FILENO) != 0)
-                     && (isatty(STDOUT_FILENO) != 0);
-    const bool daemon = args.daemon || !tty;
-
-    std::vector<std::string> deferred_errors;
-    auto log_err = [&](std::string line) {
-        if (!line.empty() && line.back() != '\n') line.push_back('\n');
-        if (daemon) {
-            std::fputs(line.c_str(), stderr);
-        } else {
-            deferred_errors.push_back(std::move(line));
-        }
-    };
-    auto flush_deferred = [&] {
-        for (const auto& s : deferred_errors) std::fputs(s.c_str(), stderr);
-        deferred_errors.clear();
-    };
 
     const std::filesystem::path config_path = args.config_path.empty()
         ? cfg::default_config_path() : args.config_path;
     cfg::Config config = load_config_or_defaults(config_path);
 
-    // Engine. Best-effort device discovery; an empty device list yields an
-    // engine-less run which still exposes MPRIS in daemon mode.
     std::unique_ptr<eng::Engine> engine;
     std::vector<eng::DeviceInfo> devices;
     if (auto r = eng::list_playback_devices(); r) {
@@ -240,15 +186,15 @@ int main(int argc, char** argv) {
         if (auto e = eng::Engine::create(std::move(ec)); e) {
             engine = std::move(*e);
         } else {
-            log_err(std::string{"transporter: engine create failed: "} +
-                    e.error().message);
+            std::fprintf(stderr, "transporter: engine create failed: %s\n",
+                         e.error().message.c_str());
         }
     } else {
-        log_err("transporter: no playback device available (" +
-                std::to_string(devices.size()) + " enumerated)");
+        std::fprintf(stderr,
+                     "transporter: no playback device available (%zu enumerated)\n",
+                     devices.size());
     }
 
-    // Library.
     std::unique_ptr<lib::Library> library;
     {
         lib::Config lc{};
@@ -264,12 +210,11 @@ int main(int argc, char** argv) {
                 library->rescan_async();
             }
         } else {
-            log_err(std::string{"transporter: library open failed: "} +
-                    l.error().message);
+            std::fprintf(stderr, "transporter: library open failed: %s\n",
+                         l.error().message.c_str());
         }
     }
 
-    // DBus / MPRIS. Hooks are stubs for now; T1+ will wire the TUI queue.
     std::unique_ptr<dbs::DbusService> dbus;
     if (config.dbus.enabled) {
         dbs::Hooks hooks;
@@ -280,49 +225,30 @@ int main(int argc, char** argv) {
         if (svc) {
             dbus = std::move(*svc);
         } else {
-            // Most common cause is "another transporter is already running" —
-            // the MPRIS well-known name is single-owner. The TUI still works
-            // without MPRIS; surface the reason on exit so the user can decide.
-            log_err(std::string{"transporter: MPRIS unavailable: "} +
-                    svc.error().message +
-                    " (running without external control)");
+            std::fprintf(stderr,
+                         "transporter: MPRIS unavailable: %s\n",
+                         svc.error().message.c_str());
         }
     }
 
-    // Optional initial file from argv: load + play immediately.
-    if (!args.file.empty() && engine != nullptr) {
-        if (auto r = engine->load(args.file); !r) {
-            log_err(std::string{"transporter: load failed: "} +
-                    r.error().message);
-        } else if (auto p = engine->play(); !p) {
-            log_err(std::string{"transporter: play failed: "} +
-                    p.error().message);
-        } else if (dbus != nullptr) {
-            dbus->notify_track_loaded();
+    // Queue: owns track list and drives engine preload() for gapless.
+    std::unique_ptr<que::Queue> queue;
+    if (engine != nullptr) {
+        queue = std::make_unique<que::Queue>(*engine);
+        engine->set_event_callback([&](const eng::Event& ev) {
+            queue->on_event(ev);
+            if (dbus != nullptr &&
+                ev.kind == eng::Event::Kind::TrackLoaded) {
+                dbus->notify_track_loaded();
+            }
+        });
+        if (!args.file.empty()) {
+            queue->append(args.file);
         }
     }
 
-    if (daemon) {
-        wait_for_termination_signal();
-    } else {
-        transporter::tui::InitOptions iopts{};
-        iopts.enable_mouse = !args.no_mouse;
-        if (transporter::tui::init(iopts) != 0) {
-            // Screen was never opened, so stderr is still safe — emit any
-            // buffered errors plus the init failure and fall back to daemon.
-            flush_deferred();
-            std::fputs("transporter: notcurses init failed, "
-                       "falling back to daemon mode\n", stderr);
-            wait_for_termination_signal();
-        } else {
-            transporter::tui::run(engine.get(), library.get());
-            transporter::tui::shutdown();
-            flush_deferred();
-        }
-    }
+    wait_for_termination_signal();
 
-    // Teardown order: stop dbus before engine; library + engine drop on
-    // unique_ptr destruction below.
     if (dbus != nullptr) {
         dbus->shutdown();
         dbus.reset();
@@ -331,6 +257,7 @@ int main(int argc, char** argv) {
         engine->set_event_callback({});
         engine->stop();
     }
+    queue.reset();
     library.reset();
     engine.reset();
     return 0;

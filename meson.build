@@ -57,13 +57,13 @@ subdir('src/library')
 subdir('src/dbus')
 subdir('src/hotplug')
 subdir('src/config')
-subdir('src/tui')
+subdir('src/queue')
 
 executable(
   'transporter',
   'src/main.cpp',
   include_directories : [inc_public, include_directories('src')],
-  dependencies : [engine_dep, library_dep, config_dep, dbus_dep, tui_dep],
+  dependencies : [engine_dep, library_dep, config_dep, dbus_dep, queue_dep],
   install : true,
 )
 

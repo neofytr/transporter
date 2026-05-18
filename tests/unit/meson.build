@@ -185,31 +185,4 @@ test_loopback_byte_compare = executable(
 )
 test('loopback_byte_compare', test_loopback_byte_compare)
 
-test_tui_notcurses_ctx = executable(
-  'test_tui_notcurses_ctx',
-  'tui_notcurses_ctx.cpp',
-  dependencies : [tui_dep, doctest_dep],
-)
-test('tui_notcurses_ctx', test_tui_notcurses_ctx)
-
-test_tui_player_bar = executable(
-  'test_tui_player_bar',
-  'tui_player_bar.cpp',
-  dependencies : [tui_dep, doctest_dep, engine_dep],
-)
-test('tui_player_bar', test_tui_player_bar)
-
-test_tui_cover = executable(
-  'test_tui_cover',
-  'tui_cover.cpp',
-  dependencies : [tui_dep, doctest_dep, png_dep],
-)
-test('tui_cover', test_tui_cover)
-
-test_tui_seekbar = executable(
-  'test_tui_seekbar',
-  'tui_seekbar.cpp',
-  dependencies : [tui_dep, doctest_dep],
-)
-test('tui_seekbar', test_tui_seekbar)
 
