@@ -32,6 +32,12 @@ __pycache__/
 # Vendored deps build artifacts
 third_party/*/build/
 
+# Web frontend (web/dist is intentionally tracked: the binary serves it)
+web/node_modules/
+web/.svelte-kit/
+web/*.local
+npm-debug.log*
+
 # Local config
 .envrc
 .env

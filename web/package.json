@@ -1,0 +1,38 @@
+{
+  "name": "transporter-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/d3-array": "^3.2.2",
+    "@types/d3-scale": "^4.0.9",
+    "@types/d3-shape": "^3.1.8",
+    "@types/node": "^24.12.3",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.14",
+    "svelte": "^5.55.5",
+    "svelte-check": "^4.4.8",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  },
+  "dependencies": {
+    "bits-ui": "^2.18.1",
+    "clsx": "^2.1.1",
+    "colorthief": "^3.3.1",
+    "d3-array": "^3.2.4",
+    "d3-scale": "^4.0.2",
+    "d3-shape": "^3.2.0",
+    "lucide-svelte": "^1.0.1",
+    "svelte-dnd-action": "^0.9.69",
+    "tailwind-merge": "^3.6.0"
+  }
+}
